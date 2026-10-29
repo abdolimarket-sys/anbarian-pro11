@@ -45,6 +45,8 @@ export interface TeamSyncPack {
   operator: string;
   role?: string;
   deviceId?: string;
+  /** شناسه یکتای بسته برای جلوگیری از ادغام تکراری */
+  packId?: string;
   exportedAt: string;
   countTotal: number;
   counts: TeamCountItem[];
@@ -137,6 +139,7 @@ export function exportTeamSyncPack(): void {
     warehouse: settings.currentWarehouse || '',
     operator: op,
     role: settings.role,
+    packId: generateId('pack'),
     exportedAt: new Date().toISOString(),
     countTotal: counted.length,
     counts: counted.map((p) => ({
@@ -218,10 +221,10 @@ export async function importTeamSyncPack(
   file: File,
   mode?: MergeMode
 ): Promise<MergeReport | null> {
-  const mergeMode: MergeMode =
-    mode ||
-    ((document.getElementById('teamMergeMode') as HTMLSelectElement | null)?.value as MergeMode) ||
-    'sum';
+  const requestedMode = mode || (document.getElementById('teamMergeMode') as HTMLSelectElement | null)?.value;
+  const mergeMode: MergeMode = requestedMode === 'sum' || requestedMode === 'max' || requestedMode === 'incoming' || requestedMode === 'local'
+    ? requestedMode
+    : 'max';
 
   try {
     const data = JSON.parse(await file.text()) as TeamSyncPack;
@@ -231,6 +234,15 @@ export async function importTeamSyncPack(
       !Array.isArray(data.counts)
     ) {
       toast('فایل همگام‌سازی معتبر نیست', 'error');
+      return null;
+    }
+
+    // جلوگیری از ادغام دوباره یک فایل؛ در حالت sum این کار از دوباره‌شماری جلوگیری می‌کند.
+    const packKey = data.packId || [data.type, data.sessionId || '', data.operator || '', data.exportedAt || '', data.counts.length].join('|');
+    let importedPacks: string[] = [];
+    try { importedPacks = JSON.parse(localStorage.getItem('anbar_imported_team_packs') || '[]'); } catch { importedPacks = []; }
+    if (importedPacks.includes(packKey)) {
+      toast('این بسته قبلاً وارد شده است؛ برای جلوگیری از دوباره‌شماری، ادغام تکرار نشد', 'info');
       return null;
     }
 
@@ -260,6 +272,15 @@ export async function importTeamSyncPack(
     let skipped = 0;
 
     data.counts.forEach((c) => {
+      if (!c || typeof c !== 'object' || (!String(c.code || '').trim() && !String(c.sku || '').trim() && !String(c.name || '').trim())) {
+        skipped++;
+        return;
+      }
+      const validQty = (v: unknown) => v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v) && v >= 0);
+      if (!validQty(c.countedQty) || !validQty(c.countedQty2) || (c.systemQty !== undefined && (typeof c.systemQty !== 'number' || !Number.isFinite(c.systemQty) || c.systemQty < 0))) {
+        skipped++;
+        return;
+      }
       let idx: number | undefined;
       const code = String(c.code || '')
         .trim()
@@ -331,8 +352,11 @@ export async function importTeamSyncPack(
     lastMergeReport = report;
     try {
       localStorage.setItem('anbar_last_team_merge', JSON.stringify(report));
+      importedPacks.push(packKey);
+      // نگهداری آخرین 500 بسته برای محدود کردن فضای ذخیره‌سازی
+      localStorage.setItem('anbar_imported_team_packs', JSON.stringify(importedPacks.slice(-500)));
     } catch {
-      // ignore
+      // ignore storage quota/private-mode failures
     }
 
     logAudit('team_import', {
@@ -344,7 +368,7 @@ export async function importTeamSyncPack(
       sessionId: data.sessionId,
     });
     toast(
-      `ادغام (${mergeMode}): ${matched} بدون تداخل، ${merged} تداخل، ${added} جدید`,
+      `ادغام (${mergeMode}): ${matched} بدون تغییر، ${merged} ادغام‌شده، ${added} جدید، ${skipped} نامعتبر/ردشده`,
       'success'
     );
     return report;

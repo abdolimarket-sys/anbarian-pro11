@@ -95,6 +95,7 @@ export function updateCount(id: string, value: number | string | null): boolean 
     const prev = p.countedQty2 ?? null;
     if (prev === next) return false;
     p.countedQty2 = next;
+    p.countUpdatedAt = new Date().toISOString();
     pushUndo({
       type: 'count2',
       id: p.id,
@@ -109,6 +110,7 @@ export function updateCount(id: string, value: number | string | null): boolean 
     const prev = p.countedQty;
     if (prev === next) return false;
     p.countedQty = next;
+    p.countUpdatedAt = new Date().toISOString();
     recordCountChange(p, prev);
   }
 
@@ -128,6 +130,7 @@ export function adjustCount(id: string, delta: number): boolean {
     const base = p.countedQty2 ?? 0;
     p.countedQty2 = Math.max(0, base + delta);
     if (prev !== p.countedQty2) {
+      p.countUpdatedAt = new Date().toISOString();
       pushUndo({
         type: 'count2',
         id: p.id,
@@ -150,6 +153,7 @@ export function adjustCount(id: string, delta: number): boolean {
     const prev = p.countedQty;
     p.countedQty = Math.max(0, (p.countedQty ?? 0) + delta);
     if (prev !== p.countedQty) {
+      p.countUpdatedAt = new Date().toISOString();
       recordCountChange(p, prev);
       save();
       notifyChange();
