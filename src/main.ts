@@ -13,6 +13,7 @@ import {
   session,
 } from './modules/state';
 import { toast, showPage, loadTheme } from './modules/ui';
+import { findProductByCode } from './modules/state';
 
 // پیام نهایی ذخیره‌سازی فایل در اپ اندروید (پس از انتخاب پوشه و نوشتن موفق).
 window.addEventListener('anbarin:file-saved', (event: Event) => {
@@ -289,7 +290,10 @@ function initScannerModule() {
         onNotFound: (code) => offerAddProduct(code),
       });
       const info = document.getElementById('lastScanInfo');
-      if (info) info.textContent = `[${result.source}] ${result.code}`;
+      if (info) {
+        const product = findProductByCode(result.code);
+        info.textContent = product ? `کالای انتخاب‌شده: ${product.name}` : `کالایی با بارکد ${result.code} پیدا نشد`;
+      }
     },
     onFieldFill: (fieldId, code) => {
       const el = document.getElementById(fieldId) as HTMLInputElement | null;
@@ -306,9 +310,12 @@ function renderShell() {
     <header>
       <div class="header-top">
         <div class="logo-area">
-          <strong>انبارین</strong>
-          <span class="version">v1.4.1</span>
-          <span class="role-badge" id="roleBadge">—</span>
+          <img class="app-logo" src="./logo.png" alt="لوگوی انبارین" width="42" height="42" decoding="async" />
+          <div class="logo-copy">
+            <strong>انبارین</strong>
+            <span class="version">نسخه ۱.۴.۲</span>
+            <span class="role-badge" id="roleBadge">—</span>
+          </div>
         </div>
         <div class="header-stats" id="headerStats"></div>
       </div>
@@ -403,8 +410,8 @@ function renderShell() {
           <input type="search" id="auditSearch" placeholder="جستجو در لاگ..." class="search-input" style="margin-top:10px" />
           <div id="auditList" style="margin-top:10px"></div>
           <div class="actions" style="margin-top:12px">
-            <button class="btn btn-secondary btn-block" id="btnExportAudit">📄 دانلود CSV لاگ</button>
-            <button class="btn btn-secondary btn-block" id="btnClearAudit">🗑 پاک کردن لاگ</button>
+            <button class="btn btn-audit-export btn-block" id="btnExportAudit" type="button">📄 دانلود CSV لاگ</button>
+            <button class="btn btn-audit-clear btn-block" id="btnClearAudit" type="button">🗑 پاک کردن لاگ</button>
           </div>
         </div>
       </section>
@@ -542,10 +549,10 @@ function renderShell() {
       <div class="modal-card">
         <div id="qtyModalName" style="font-size:1.15rem;font-weight:800;color:var(--primary-deeper)"></div>
         <div id="qtyModalMeta" class="hint" style="margin-top:4px"></div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:16px">
-          <button class="btn btn-secondary" id="qtyMinus" style="min-width:48px;font-size:1.3rem">−</button>
+        <div class="qty-controls">
+          <button class="btn btn-secondary qty-step" id="qtyMinus" aria-label="کم کردن تعداد">−</button>
           <input type="number" id="qtyModalInput" min="0" step="any" inputmode="decimal" class="qty-input" />
-          <button class="btn btn-secondary" id="qtyPlus" style="min-width:48px;font-size:1.3rem">＋</button>
+          <button class="btn btn-secondary qty-step" id="qtyPlus" aria-label="زیاد کردن تعداد">+</button>
         </div>
         <div id="qtyModalDiff" style="text-align:center;font-size:.85rem;margin:10px 0;min-height:22px"></div>
         <div style="display:flex;gap:8px;margin-bottom:10px">
@@ -574,6 +581,32 @@ function renderShell() {
 }
 
 function bindEvents() {
+  // جلسه جدید و بستن جلسه قبلاً فقط در رابط کاربری نمایش داده می‌شدند؛
+  // رویداد کلیک آن‌ها به عملیات واقعی متصل نبود.
+  document.getElementById('btnStartSession')?.addEventListener('click', () => {
+    try {
+      if (!guardWrite('شروع جلسه جدید')) return;
+      actionStartSession();
+      updateHeader();
+      refreshLists();
+      updateUndoBtn();
+    } catch (err) {
+      console.error('[Anbarin] start session failed:', err);
+      toast('شروع جلسه جدید انجام نشد؛ دوباره تلاش کنید', 'error');
+    }
+  });
+  document.getElementById('btnCloseSession')?.addEventListener('click', () => {
+    try {
+      if (!guardWrite('بستن جلسه')) return;
+      actionCloseSession();
+      updateHeader();
+      refreshLists();
+      updateUndoBtn();
+    } catch (err) {
+      console.error('[Anbarin] close session failed:', err);
+      toast('بستن جلسه انجام نشد؛ دوباره تلاش کنید', 'error');
+    }
+  });
   document.getElementById('btnSaveSettings')?.addEventListener('click', () => {
     try {
       applySettingsFromForm();
@@ -599,6 +632,65 @@ function bindEvents() {
     updateHeader();
     refreshLists();
   });
+
+  // عملیات همگام‌سازی شمارش با موجودی سیستم؛ این دکمه‌ها قبلاً تابع داشتند
+  // اما رویداد کلیک به آن‌ها متصل نشده بود.
+  document.getElementById('btnApplySystem')?.addEventListener('click', () => {
+    if (!guardWrite('اعمال شمارش روی موجودی سیستم')) return;
+    try {
+      if (applyCountsToSystem()) {
+        updateHeader();
+        refreshLists();
+        updateUndoBtn();
+      }
+    } catch (err) {
+      console.error('[Anbarin] apply counts to system failed:', err);
+      toast('اعمال شمارش روی موجودی سیستم ناموفق بود؛ دوباره تلاش کنید', 'error');
+    }
+  });
+  document.getElementById('btnResetToSystem')?.addEventListener('click', () => {
+    if (!guardWrite('برگرداندن شمارش به مقدار سیستم')) return;
+    try {
+      if (resetCountsToSystem()) {
+        updateHeader();
+        refreshLists();
+        updateUndoBtn();
+      }
+    } catch (err) {
+      console.error('[Anbarin] reset counts to system failed:', err);
+      toast('همسان‌سازی شمارش با موجودی سیستم ناموفق بود؛ دوباره تلاش کنید', 'error');
+    }
+  });
+
+  // چاپ لیبل بارکد؛ دکمه قبلاً در رابط بود اما رویداد کلیک نداشت.
+  document.getElementById('btnPrintLabels')?.addEventListener('click', () => {
+    try {
+      printLabelsBulk(50);
+    } catch (err) {
+      console.error('[Anbarin] print barcode labels failed:', err);
+      toast('چاپ لیبل انجام نشد؛ مرورگر یا مجوز چاپ را بررسی کنید', 'error');
+    }
+  });
+
+  // لاگ عملیات: دکمه‌ها قبلاً در صفحه وجود داشتند اما رویداد کلیک نداشتند.
+  document.getElementById('btnExportAudit')?.addEventListener('click', () => {
+    try {
+      exportAuditCSV();
+    } catch (err) {
+      console.error('[Anbarin] export audit failed:', err);
+      toast('دانلود لاگ ناموفق بود؛ دوباره تلاش کنید', 'error');
+    }
+  });
+  document.getElementById('btnClearAudit')?.addEventListener('click', () => {
+    try {
+      clearAuditLog();
+      renderAuditList();
+    } catch (err) {
+      console.error('[Anbarin] clear audit failed:', err);
+      toast('پاک کردن لاگ ناموفق بود', 'error');
+    }
+  });
+  document.getElementById('auditSearch')?.addEventListener('input', () => renderAuditList());
 
   document.getElementById('btnOpenScanner')?.addEventListener('click', () => {
     if (!guardWrite('اسکن')) return;
@@ -824,6 +916,42 @@ function bindEvents() {
   });
   document.getElementById('btnExportCsv')?.addEventListener('click', () => exportCSV(false));
   document.getElementById('btnExportJson')?.addEventListener('click', () => exportJSON());
+
+  // دکمه‌های لایسنس و شناسه دستگاه نیز باید عملکرد واقعی داشته باشند.
+  document.getElementById('btnActivateLicense')?.addEventListener('click', () => {
+    try {
+      if (activateLicenseFromInput()) updateHeader();
+    } catch (err) {
+      console.error('[Anbarin] license activation failed:', err);
+      toast('فعال‌سازی لایسنس انجام نشد؛ کلید را بررسی کنید', 'error');
+    }
+  });
+  document.getElementById('btnDeactivateLicense')?.addEventListener('click', () => {
+    try {
+      deactivateLicense();
+      updateHeader();
+    } catch (err) {
+      console.error('[Anbarin] license deactivation failed:', err);
+      toast('حذف لایسنس انجام نشد', 'error');
+    }
+  });
+  document.getElementById('btnCopyDeviceId')?.addEventListener('click', async () => {
+    const deviceId = getDeviceId();
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(deviceId);
+      } else {
+        const input = document.getElementById('deviceIdDisplay') as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+        if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
+      }
+      toast('شناسه دستگاه کپی شد', 'success');
+    } catch (err) {
+      console.error('[Anbarin] copy device ID failed:', err);
+      toast('کپی خودکار ممکن نشد؛ شناسه را دستی انتخاب و کپی کنید', 'error');
+    }
+  });
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {

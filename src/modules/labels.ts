@@ -3,7 +3,7 @@
  */
 
 import type { Product } from '@/types';
-import { products, settings, logAudit, save, invalidateStats, filterByActiveWarehouse } from './state';
+import { products, settings, logAudit, save, invalidateStats, filterByActiveWarehouse, pushUndo } from './state';
 import { toast } from './ui';
 import { guardLocked } from './count';
 import { esc } from '@/utils/helpers';
@@ -138,25 +138,52 @@ function getLabelArea(): HTMLElement {
 }
 
 /** چاپ لیبل یک کالا */
+function openPrintDialog(area: HTMLElement): void {
+  // آماده شدن صفحه و تصاویر قبل از باز کردن پنجره چاپ، به‌ویژه در موبایل.
+  const images = Array.from(area.querySelectorAll('img'));
+  const waitForImages = Promise.all(images.map((img) => {
+    if (img.complete) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    });
+  }));
+  void waitForImages.finally(() => {
+    window.requestAnimationFrame(() => {
+      window.setTimeout(() => {
+        try {
+          window.focus();
+          window.print();
+        } catch (err) {
+          console.error('[Anbarin] browser print dialog failed:', err);
+          toast('مرورگر امکان باز کردن پنجره چاپ را نداد', 'error');
+        }
+      }, 120);
+    });
+  });
+}
+
+/** چاپ لیبل یک کالا */
 export function printProductLabel(p: Product): void {
   const area = getLabelArea();
   area.innerHTML = labelHtmlForProduct(p);
-  window.print();
+  openPrintDialog(area);
 }
 
 /** چاپ دسته‌ای تا ۵۰ کالای انبار فعال */
 export function printLabelsBulk(max = 50): void {
   const list = filterByActiveWarehouse(products)
-    .filter((p) => p.code || p.sku)
+    .filter((p) => String(p.code || p.sku || '').trim().length > 0)
     .slice(0, max);
   if (!list.length) {
-    toast('کالایی با بارکد برای چاپ نیست', 'error');
+    toast('برای کالاهای انبار فعال، کد یا بارکدی ثبت نشده است', 'error');
     return;
   }
   const area = getLabelArea();
   area.innerHTML = list.map(labelHtmlForProduct).join('');
   logAudit('print_labels', { count: list.length });
-  window.print();
+  toast(`آماده‌سازی چاپ ${list.length} لیبل`, 'success');
+  openPrintDialog(area);
 }
 
 // ——— عملیات دسته‌ای ———
@@ -171,6 +198,12 @@ export function applyCountsToSystem(): boolean {
   }
   if (!confirm(`موجودی سیستم ${targets.length} کالا برابر شمارش واقعی شود؟`)) return false;
 
+  pushUndo({
+    type: 'bulk',
+    items: targets.map((p) => ({ id: p.id, prev: p.countedQty, prevSystemQty: p.systemQty })),
+    prev: null,
+    ts: Date.now(),
+  });
   targets.forEach((p) => {
     p.systemQty = p.countedQty as number;
   });
@@ -190,6 +223,12 @@ export function resetCountsToSystem(): boolean {
     return false;
   }
   if (!confirm(`شمارش ${targets.length} کالا به مقدار سیستم برگردد؟`)) return false;
+  pushUndo({
+    type: 'bulk',
+    items: targets.map((p) => ({ id: p.id, prev: p.countedQty })),
+    prev: null,
+    ts: Date.now(),
+  });
   targets.forEach((p) => {
     p.countedQty = p.systemQty;
   });

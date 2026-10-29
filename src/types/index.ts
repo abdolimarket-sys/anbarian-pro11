@@ -64,7 +64,7 @@ export interface UndoItem {
   next?: number | null;
   name?: string;
   ts: number;
-  items?: Array<{ id: string; prev: number | null }>;
+  items?: Array<{ id: string; prev: number | null; prevSystemQty?: number; prevCountedQty2?: number | null }>;
   phase?: number;
 }
 

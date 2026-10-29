@@ -71,9 +71,35 @@ header {
   align-items: center;
 }
 
+.logo-area {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.logo-area .app-logo {
+  display: block;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  object-fit: contain;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 3px;
+}
+
+.logo-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
 .logo-area strong {
   font-size: 1.25rem;
   font-weight: 800;
+  line-height: 1.35;
 }
 
 .logo-area .version {
@@ -193,6 +219,28 @@ main {
 
 .btn-secondary:not(:disabled):active {
   background: var(--primary-soft);
+}
+
+/* دکمه‌های لاگ باید در حالت فعال از پس‌زمینه کارت واضحاً متمایز باشند. */
+.btn-audit-export {
+  background: #0f766e;
+  color: #ffffff;
+  border: 1px solid #0f766e;
+  box-shadow: 0 2px 5px rgba(15, 118, 110, 0.22);
+}
+.btn-audit-clear {
+  background: #be123c;
+  color: #ffffff;
+  border: 1px solid #9f1239;
+  box-shadow: 0 2px 5px rgba(190, 18, 60, 0.18);
+}
+.btn-audit-export:hover:not(:disabled) { background: #115e59; }
+.btn-audit-clear:hover:not(:disabled) { background: #9f1239; }
+.btn-audit-export:disabled, .btn-audit-clear:disabled {
+  background: #e5e7eb !important;
+  color: #6b7280 !important;
+  border-color: #d1d5db !important;
+  box-shadow: none !important;
 }
 
 .filter-chip {
@@ -486,15 +534,39 @@ main {
 }
 .modal-card {
   background: var(--card);
-  width: 100%;
+  box-sizing: border-box;
+  width: calc(100% - 24px);
   max-width: 360px;
   border-radius: 20px;
   padding: 20px;
   box-shadow: var(--shadow);
 }
 .qty-modal { z-index: 250; }
+.qty-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  width: 100%;
+  min-width: 0;
+}
+.qty-step {
+  flex: 0 0 42px;
+  width: 42px;
+  min-width: 42px;
+  height: 46px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.35rem;
+  line-height: 1;
+}
 .qty-input {
-  flex: 1;
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  box-sizing: border-box;
   text-align: center;
   font-size: 1.5rem;
   font-weight: 800;
@@ -572,4 +644,74 @@ main {
 }
 select.search-input {
   appearance: auto;
+}
+
+/* سراسری: وضعیت دکمه‌های فعال و غیرفعال باید در تمام صفحات واضح باشد. */
+button {
+  -webkit-appearance: none;
+  appearance: none;
+  touch-action: manipulation;
+}
+button:not(:disabled):not([aria-disabled='true']) {
+  cursor: pointer;
+}
+button:disabled,
+button[disabled],
+button[aria-disabled='true'] {
+  background: #e5e7eb !important;
+  background-image: none !important;
+  color: #6b7280 !important;
+  border-color: #cbd5e1 !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
+  cursor: not-allowed !important;
+  filter: grayscale(.35);
+  transform: none !important;
+}
+button:not(:disabled):not([aria-disabled='true']):focus-visible {
+  outline: 3px solid #f59e0b;
+  outline-offset: 2px;
+}
+.btn:not(:disabled):not([aria-disabled='true']) {
+  filter: none;
+  box-shadow: 0 2px 5px rgba(15, 23, 42, .12);
+}
+.btn-primary:not(:disabled):not([aria-disabled='true']) {
+  background: linear-gradient(135deg, #0f766e, #115e59);
+  color: #fff;
+}
+.btn-secondary:not(:disabled):not([aria-disabled='true']) {
+  background: #d1fae5;
+  color: #064e3b;
+  border: 1px solid #059669;
+}
+.btn-secondary:not(:disabled):not([aria-disabled='true']):hover {
+  background: #a7f3d0;
+}
+.filter-chip:not(:disabled):not([aria-disabled='true']) {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid #94a3b8;
+}
+.filter-chip.active:not(:disabled):not([aria-disabled='true']) {
+  background: #0f766e;
+  color: #fff;
+  border-color: #115e59;
+  box-shadow: 0 2px 5px rgba(15, 118, 110, .22);
+}
+.nav-item:not(:disabled):not([aria-disabled='true']) {
+  background: transparent;
+  color: var(--text-soft);
+}
+.nav-item.active:not(:disabled):not([aria-disabled='true']) {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  box-shadow: inset 0 3px 0 var(--primary);
+}
+[data-theme='dark'] button:disabled,
+[data-theme='dark'] button[disabled],
+[data-theme='dark'] button[aria-disabled='true'] {
+  background: #263238 !important;
+  color: #aab4bd !important;
+  border-color: #475569 !important;
 }

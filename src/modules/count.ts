@@ -205,7 +205,12 @@ export function undoLast(): boolean {
   } else if (u.type === 'bulk' && u.items) {
     u.items.forEach((it) => {
       const p = products.find((x) => x.id === it.id);
-      if (p) p.countedQty = it.prev;
+      if (!p) return;
+      p.countedQty = it.prev;
+      if (typeof it.prevSystemQty === 'number') p.systemQty = it.prevSystemQty;
+      if (Object.prototype.hasOwnProperty.call(it, 'prevCountedQty2')) {
+        p.countedQty2 = it.prevCountedQty2 ?? null;
+      }
     });
     toast('عملیات دسته‌ای برگشت داده شد', 'success');
   }
@@ -496,10 +501,10 @@ export function clearAllCounts(): boolean {
 
   const items: UndoItem['items'] = [];
   products.forEach((p) => {
-    if (p.countedQty !== null) {
-      items!.push({ id: p.id, prev: p.countedQty });
-      p.countedQty = null;
+    if (p.countedQty !== null || p.countedQty2 != null) {
+      items!.push({ id: p.id, prev: p.countedQty, prevCountedQty2: p.countedQty2 ?? null });
     }
+    p.countedQty = null;
     if (p.countedQty2 != null) p.countedQty2 = null;
   });
 
