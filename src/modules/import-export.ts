@@ -323,10 +323,84 @@ function productToExportRow(p: Product): Record<string, unknown> {
   };
 }
 
-function matrixToImportRows(matrix: unknown[][]): ImportRow[] {
+const IMPORT_FIELD_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: '', label: 'نادیده بگیر' },
+  { value: 'name', label: 'نام کالا' },
+  { value: 'code', label: 'بارکد' },
+  { value: 'sku', label: 'کد کالا' },
+  { value: 'qty', label: 'موجودی سیستم' },
+  { value: 'counted', label: 'تعداد شمارش‌شده' },
+  { value: 'unit', label: 'واحد' },
+  { value: 'price', label: 'قیمت' },
+  { value: 'location', label: 'محل / قفسه' },
+  { value: 'warehouse', label: 'انبار' },
+  { value: 'note', label: 'یادداشت' },
+  { value: 'serial', label: 'سریال' },
+  { value: 'batch', label: 'سری ساخت' },
+  { value: 'expiry', label: 'تاریخ انقضا' },
+  { value: 'minQty', label: 'حداقل موجودی' },
+  { value: 'maxQty', label: 'حداکثر موجودی' },
+  { value: 'unitFactor', label: 'ضریب واحد' },
+];
+
+function chooseColumnMapping(headers: string[]): Promise<Record<number, string> | null> {
+  return new Promise((resolve) => {
+    const previous = document.getElementById('importColumnMapping');
+    previous?.remove();
+    const detected = mapHeaders(headers);
+    const overlay = document.createElement('div');
+    overlay.id = 'importColumnMapping';
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#0009;display:flex;align-items:center;justify-content:center;padding:14px;';
+    const card = document.createElement('div');
+    card.dir = 'rtl';
+    card.style.cssText = 'width:min(620px,100%);max-height:85vh;overflow:auto;background:var(--card,#fff);color:var(--text,#222);border-radius:16px;padding:18px;box-shadow:0 12px 40px #0004;';
+    const title = document.createElement('h3'); title.textContent = 'تشخیص و انتخاب ستون‌های اکسل';
+    title.style.cssText = 'margin-bottom:6px;font-size:1.1rem;';
+    const intro = document.createElement('p'); intro.textContent = 'ستون‌ها به‌صورت خودکار تشخیص داده شده‌اند. در صورت نیاز، نوع هر ستون را تغییر دهید.';
+    intro.style.cssText = 'font-size:.9rem;color:var(--text-soft,#666);margin-bottom:12px;';
+    const form = document.createElement('div'); form.style.cssText = 'display:grid;gap:9px;';
+    const selects: HTMLSelectElement[] = [];
+    headers.forEach((header, i) => {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:grid;grid-template-columns:minmax(0,1fr) minmax(130px,.9fr);gap:10px;align-items:center;padding:8px;border:1px solid var(--border,#ddd);border-radius:10px;';
+      const name = document.createElement('span'); name.textContent = `${header.trim() || `ستون ${i + 1}`} (${i + 1})`; name.style.cssText = 'overflow-wrap:anywhere;font-size:.9rem;';
+      const select = document.createElement('select'); select.style.cssText = 'width:100%;min-width:0;padding:8px;border-radius:8px;border:1px solid var(--border,#ccc);background:var(--bg,#fff);color:var(--text,#222);';
+      IMPORT_FIELD_OPTIONS.forEach((opt) => { const option = document.createElement('option'); option.value = opt.value; option.textContent = opt.label; select.appendChild(option); });
+      const guessed = detected[i] || '';
+      select.value = guessed;
+      selects.push(select); row.append(name, select); form.appendChild(row);
+    });
+    const actions = document.createElement('div'); actions.style.cssText = 'display:flex;gap:10px;margin-top:16px;';
+    const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'انصراف';
+    cancel.style.cssText = 'flex:1;padding:11px;border:1px solid var(--border,#ccc);border-radius:10px;background:transparent;color:inherit;font:inherit;';
+    const apply = document.createElement('button'); apply.type = 'button'; apply.textContent = 'ادامه وارد کردن';
+    apply.style.cssText = 'flex:1;padding:11px;border:0;border-radius:10px;background:#0d9488;color:white;font-weight:700;font:inherit;';
+    actions.append(cancel, apply); card.append(title, intro, form, actions); overlay.appendChild(card); document.body.appendChild(overlay);
+    const finish = (value: Record<number, string> | null) => { overlay.remove(); resolve(value); };
+    cancel.onclick = () => finish(null);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) finish(null); });
+    apply.onclick = () => {
+      const mapping: Record<number, string> = {};
+      selects.forEach((select, i) => { if (select.value) mapping[i] = select.value; });
+      if (!Object.values(mapping).some((v) => ['name', 'code', 'sku'].includes(v))) {
+        toast('حداقل ستون نام کالا، بارکد یا کد کالا را انتخاب کنید', 'error'); return;
+      }
+      finish(mapping);
+    };
+  });
+}
+
+async function matrixToMappedImportRows(matrix: unknown[][]): Promise<ImportRow[] | null> {
   if (!matrix.length) return [];
   const headers = matrix[0].map((h) => String(h ?? ''));
-  const colMap = mapHeaders(headers);
+  const mapping = await chooseColumnMapping(headers);
+  return mapping ? matrixToImportRows(matrix, mapping) : null;
+}
+
+function matrixToImportRows(matrix: unknown[][], suppliedMap?: Record<number, string>): ImportRow[] {
+  if (!matrix.length) return [];
+  const headers = matrix[0].map((h) => String(h ?? ''));
+  const colMap = suppliedMap || mapHeaders(headers);
   const rows: ImportRow[] = [];
 
   for (let r = 1; r < matrix.length; r++) {
@@ -437,8 +511,8 @@ export function applyImportRows(rows: ImportRow[], mode: ImportMode): ImportResu
       };
       products.push(p);
       const i = products.length - 1;
-      if (p.code) byKey.set(`b:${String(p.code).trim().toLowerCase()}`, i);
-      if (p.sku) byKey.set(`s:${String(p.sku).trim().toLowerCase()}`, i);
+      if (p.code) byKey.set(`b:${normalizeDigits(p.code).trim().toLowerCase()}`, i);
+      if (p.sku) byKey.set(`s:${normalizeDigits(p.sku).trim().toLowerCase()}`, i);
       added++;
     }
   }
@@ -492,7 +566,8 @@ export async function processImportFile(
   if (/\.(csv|txt)$/i.test(fname)) {
     const text = await file.text();
     const matrix = parseCSVText(text);
-    const rows = matrixToImportRows(matrix);
+    const rows = await matrixToMappedImportRows(matrix);
+    if (rows === null) return null;
     if (!rows.length) {
       toast('ردیف معتبری در CSV پیدا نشد', 'error');
       return null;
@@ -528,7 +603,8 @@ async function processExcelFile(
         defval: '',
         raw: false,
       });
-      const rows = matrixToImportRows(matrix);
+      const rows = await matrixToMappedImportRows(matrix);
+      if (rows === null) return null;
       if (!rows.length) {
         toast('ردیف معتبری پیدا نشد', 'error');
         return null;
