@@ -14,7 +14,7 @@ import {
   findProductByCode,
 } from './state';
 import { toast } from './ui';
-import { generateId } from '@/utils/helpers';
+import { generateId, normalizeDigits } from '@/utils/helpers';
 import { canCount, guardLocked } from './count';
 
 let editingId: string | null = null;
@@ -223,7 +223,7 @@ export function saveProductFromForm(): boolean {
   const id = val('productId');
   const data = {
     name,
-    code: val('productCode'),
+    code: normalizeDigits(val('productCode')),
     sku: val('productSku'),
     unit: val('productUnit') || 'عدد',
     unitFactor: num('productUnitFactor') || 1,
@@ -292,6 +292,7 @@ export function deleteProduct(id: string): boolean {
 
 /** اتصال از اسکن «یافت نشد» */
 export function offerAddProduct(code: string): void {
+  code = normalizeDigits(code);
   if (confirm('کالایی با بارکد «' + code + '» نیست. اضافه شود؟')) {
     openProductModal(null, code);
   }

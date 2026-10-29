@@ -26,7 +26,7 @@ import {
   getOperatorName,
   DEFAULT_SETTINGS,
 } from './storage';
-import { generateId } from '@/utils/helpers';
+import { generateId, normalizeDigits } from '@/utils/helpers';
 
 // ——— State ———
 export let products: Product[] = [];
@@ -51,13 +51,19 @@ export function rebuildIndex(): void {
     const p = products[i];
     if (p.code) {
       const c = String(p.code).trim();
+      const normalized = normalizeDigits(c);
       codeIndex[c] = i;
       codeIndex[c.toLowerCase()] = i;
+      codeIndex[normalized] = i;
+      codeIndex[normalized.toLowerCase()] = i;
     }
     if (p.sku) {
       const s = String(p.sku).trim();
+      const normalizedSku = normalizeDigits(s);
       codeIndex[s] = i;
       codeIndex[s.toLowerCase()] = i;
+      codeIndex[normalizedSku] = i;
+      codeIndex[normalizedSku.toLowerCase()] = i;
     }
   }
   statsCache = null;
@@ -65,7 +71,7 @@ export function rebuildIndex(): void {
 
 export function findProductByCode(code: string | null | undefined): Product | null {
   if (!code) return null;
-  const t = String(code).trim();
+  const t = normalizeDigits(code);
   let i = codeIndex[t];
   if (i === undefined) i = codeIndex[t.toLowerCase()];
   if (i === undefined) return null;

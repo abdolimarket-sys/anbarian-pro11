@@ -3,10 +3,13 @@
  */
 
 import type { Product } from '@/types';
-import { products, settings, logAudit, save, invalidateStats, filterByActiveWarehouse, pushUndo } from './state';
+import { Capacitor, registerPlugin } from '@capacitor/core';
+import { products, settings, logAudit, save, invalidateStats, filterByActiveWarehouse } from './state';
 import { toast } from './ui';
 import { guardLocked } from './count';
 import { esc } from '@/utils/helpers';
+
+const NativePrint = registerPlugin<{ printLabels(options: { html: string }): Promise<{ started: boolean }> }>('NativePrint');
 
 // ——— Code128B ———
 const CODE128_B_START = 104;
@@ -107,7 +110,11 @@ function ensureLabelStyles(): void {
     @media print{
       body *{visibility:hidden !important}
       .label-sheet,.label-sheet *{visibility:visible !important}
-      .label-sheet{display:block !important;position:absolute;left:0;top:0;width:100%}
+      .label-sheet{display:block !important;position:fixed !important;left:0 !important;top:0 !important;width:100% !important;margin:0 !important;padding:0 !important;background:#fff !important;z-index:2147483647 !important}
+      .label-card{display:inline-block !important;visibility:visible !important;background:#fff !important;color:#000 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+      .label-card img{display:block !important;visibility:visible !important;width:auto !important;max-width:100% !important;height:auto !important;min-height:52px;object-fit:contain;margin:0 auto;image-rendering:pixelated}
+      .label-name,.label-code,.label-loc,.no-bc{visibility:visible !important;color:#000 !important}
+      @page{margin:8mm}
       .nav,header,.fab,.toast,.modal-overlay{display:none !important}
     }
     .label-card{
@@ -137,30 +144,73 @@ function getLabelArea(): HTMLElement {
   return area;
 }
 
-/** چاپ لیبل یک کالا */
+/** باز کردن چاپ در اندروید بومی یا پنجره چاپ مرورگر */
 function openPrintDialog(area: HTMLElement): void {
-  // آماده شدن صفحه و تصاویر قبل از باز کردن پنجره چاپ، به‌ویژه در موبایل.
-  const images = Array.from(area.querySelectorAll('img'));
-  const waitForImages = Promise.all(images.map((img) => {
-    if (img.complete) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      img.onload = () => resolve();
-      img.onerror = () => resolve();
+  const html = `<!doctype html><html lang="fa"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+    @page{size:auto;margin:8mm}*{box-sizing:border-box}html,body{margin:0;padding:0;background:#fff;color:#000;font-family:Arial,sans-serif;direction:rtl}
+    .label-sheet{display:block!important;width:100%;background:#fff}
+    .label-card{display:inline-block;vertical-align:top;break-inside:avoid;page-break-inside:avoid;border:1px dashed #94a3b8;border-radius:8px;padding:10px;margin:6px;text-align:center;width:220px;background:#fff;color:#000;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .label-card img{display:block;width:auto;max-width:100%;height:auto;min-height:52px;object-fit:contain;margin:0 auto;image-rendering:pixelated}
+    .label-name{font-weight:800;font-size:13px;margin-top:6px}.label-code{font-family:monospace;font-size:12px;direction:ltr}.label-loc{font-size:11px;color:#475569;margin-top:2px}.no-bc{padding:20px;color:#64748b;font-size:12px}
+  </style></head><body><div class="label-sheet">${area.innerHTML}</div></body></html>`;
+
+  // داده‌های بارکد به شکل data URL ساخته می‌شوند. منتظر ماندن برای decode در بعضی WebViewها
+  // می‌تواند بی‌پایان بماند؛ بنابراین مسیر چاپ را بدون انتظار نامحدود اجرا می‌کنیم.
+  if (Capacitor.isNativePlatform()) {
+    NativePrint.printLabels({ html }).then((result) => {
+      if (result?.started) toast('پنجره چاپ اندروید باز شد؛ چاپگر را انتخاب کنید', 'success');
+      else toast('سیستم چاپ پاسخی نداد؛ دوباره تلاش کنید', 'error');
+    }).catch((err) => {
+      console.error('[Anbarin] native print failed:', err);
+      toast('چاپ اندروید باز نشد. اگر برنامه قدیمی است، APK جدید نصب کنید.', 'error');
     });
-  }));
-  void waitForImages.finally(() => {
-    window.requestAnimationFrame(() => {
-      window.setTimeout(() => {
-        try {
-          window.focus();
-          window.print();
-        } catch (err) {
-          console.error('[Anbarin] browser print dialog failed:', err);
-          toast('مرورگر امکان باز کردن پنجره چاپ را نداد', 'error');
-        }
-      }, 120);
-    });
-  });
+    return;
+  }
+
+  // چاپ از iframe مستقل؛ از پنهان بودن labelPrintArea و مسدودشدن پنجره چاپ جلوگیری می‌کند.
+  try {
+    const frame = document.createElement('iframe');
+    frame.setAttribute('title', 'پیش‌نمایش چاپ لیبل');
+    frame.setAttribute('aria-hidden', 'true');
+    frame.style.position = 'fixed';
+    frame.style.right = '0';
+    frame.style.bottom = '0';
+    frame.style.width = '1px';
+    frame.style.height = '1px';
+    frame.style.border = '0';
+    frame.style.opacity = '0.01';
+    frame.style.pointerEvents = 'none';
+    let printed = false;
+    const cleanup = () => window.setTimeout(() => frame.remove(), 1500);
+    frame.onload = () => {
+      if (printed) return;
+      printed = true;
+      try {
+        const w = frame.contentWindow;
+        if (!w) throw new Error('print frame has no window');
+        w.onafterprint = cleanup;
+        w.focus();
+        window.setTimeout(() => {
+          try { w.print(); }
+          catch (err) {
+            console.error('[Anbarin] iframe print failed:', err);
+            toast('مرورگر امکان باز کردن چاپ را نداد؛ در Chrome امتحان کنید', 'error');
+            cleanup();
+          }
+          window.setTimeout(cleanup, 30000);
+        }, 150);
+      } catch (err) {
+        console.error('[Anbarin] print frame failed:', err);
+        toast('باز کردن پنجره چاپ ناموفق بود', 'error');
+        cleanup();
+      }
+    };
+    frame.srcdoc = html;
+    document.body.appendChild(frame);
+  } catch (err) {
+    console.error('[Anbarin] browser print setup failed:', err);
+    toast('آماده‌سازی چاپ ناموفق بود؛ مرورگر را دوباره باز کنید', 'error');
+  }
 }
 
 /** چاپ لیبل یک کالا */
@@ -198,12 +248,6 @@ export function applyCountsToSystem(): boolean {
   }
   if (!confirm(`موجودی سیستم ${targets.length} کالا برابر شمارش واقعی شود؟`)) return false;
 
-  pushUndo({
-    type: 'bulk',
-    items: targets.map((p) => ({ id: p.id, prev: p.countedQty, prevSystemQty: p.systemQty })),
-    prev: null,
-    ts: Date.now(),
-  });
   targets.forEach((p) => {
     p.systemQty = p.countedQty as number;
   });
@@ -223,12 +267,6 @@ export function resetCountsToSystem(): boolean {
     return false;
   }
   if (!confirm(`شمارش ${targets.length} کالا به مقدار سیستم برگردد؟`)) return false;
-  pushUndo({
-    type: 'bulk',
-    items: targets.map((p) => ({ id: p.id, prev: p.countedQty })),
-    prev: null,
-    ts: Date.now(),
-  });
   targets.forEach((p) => {
     p.countedQty = p.systemQty;
   });

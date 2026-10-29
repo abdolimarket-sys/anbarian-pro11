@@ -8,6 +8,7 @@
 
 import type { AppSettings } from '@/types';
 import { toast } from './ui';
+import { normalizeDigits } from '@/utils/helpers';
 
 export type ScanSource = 'camera' | 'native' | 'html5' | 'bt' | 'manual';
 
@@ -112,7 +113,7 @@ export function closeScanner(): void {
 
 export function submitManualBarcode(raw?: string): void {
   const input = document.getElementById('manualBarcode') as HTMLInputElement | null;
-  const code = (raw ?? input?.value ?? '').trim();
+  const code = normalizeDigits(raw ?? input?.value ?? '');
   if (!code) {
     toast('بارکد را وارد کنید', 'error');
     return;
@@ -191,7 +192,7 @@ function shouldAcceptScan(code: string): boolean {
 }
 
 function emitScan(code: string, source: ScanSource): void {
-  code = String(code).trim();
+  code = normalizeDigits(code);
   if (!code || !opts) return;
 
   if (opts.canScan && !opts.canScan()) {

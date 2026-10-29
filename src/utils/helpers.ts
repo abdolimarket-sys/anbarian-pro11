@@ -12,6 +12,15 @@ interface SaveFilePluginAPI {
 }
 const NativeSaveFile = registerPlugin<SaveFilePluginAPI>('SaveFile');
 
+
+/** تبدیل ارقام فارسی و عربی به ارقام استاندارد برای بارکد و کد کالا */
+export function normalizeDigits(value: unknown): string {
+  return String(value ?? '')
+    .replace(/[۰-۹]/g, (d) => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, (d) => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .trim();
+}
+
 export function esc(str: unknown): string {
   return String(str ?? '')
     .replace(/&/g, '&amp;')

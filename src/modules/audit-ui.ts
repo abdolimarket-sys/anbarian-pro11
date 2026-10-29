@@ -34,9 +34,6 @@ function actionLabel(action: string): string {
     product_delete: 'حذف کالا',
     clear_counts: 'پاک کردن شمارش‌ها',
     bulk_zero: 'صفر کردن مانده',
-    print_labels: 'چاپ لیبل بارکد',
-    apply_system: 'اعمال شمارش روی موجودی سیستم',
-    reset_counts_to_system: 'همسان‌سازی شمارش با سیستم',
     backup: 'پشتیبان',
   };
   return map[action] || action;

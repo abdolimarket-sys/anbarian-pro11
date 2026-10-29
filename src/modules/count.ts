@@ -95,7 +95,6 @@ export function updateCount(id: string, value: number | string | null): boolean 
     const prev = p.countedQty2 ?? null;
     if (prev === next) return false;
     p.countedQty2 = next;
-    p.countUpdatedAt = new Date().toISOString();
     pushUndo({
       type: 'count2',
       id: p.id,
@@ -110,7 +109,6 @@ export function updateCount(id: string, value: number | string | null): boolean 
     const prev = p.countedQty;
     if (prev === next) return false;
     p.countedQty = next;
-    p.countUpdatedAt = new Date().toISOString();
     recordCountChange(p, prev);
   }
 
@@ -130,7 +128,6 @@ export function adjustCount(id: string, delta: number): boolean {
     const base = p.countedQty2 ?? 0;
     p.countedQty2 = Math.max(0, base + delta);
     if (prev !== p.countedQty2) {
-      p.countUpdatedAt = new Date().toISOString();
       pushUndo({
         type: 'count2',
         id: p.id,
@@ -153,7 +150,6 @@ export function adjustCount(id: string, delta: number): boolean {
     const prev = p.countedQty;
     p.countedQty = Math.max(0, (p.countedQty ?? 0) + delta);
     if (prev !== p.countedQty) {
-      p.countUpdatedAt = new Date().toISOString();
       recordCountChange(p, prev);
       save();
       notifyChange();
@@ -209,12 +205,7 @@ export function undoLast(): boolean {
   } else if (u.type === 'bulk' && u.items) {
     u.items.forEach((it) => {
       const p = products.find((x) => x.id === it.id);
-      if (!p) return;
-      p.countedQty = it.prev;
-      if (typeof it.prevSystemQty === 'number') p.systemQty = it.prevSystemQty;
-      if (Object.prototype.hasOwnProperty.call(it, 'prevCountedQty2')) {
-        p.countedQty2 = it.prevCountedQty2 ?? null;
-      }
+      if (p) p.countedQty = it.prev;
     });
     toast('عملیات دسته‌ای برگشت داده شد', 'success');
   }
@@ -505,10 +496,10 @@ export function clearAllCounts(): boolean {
 
   const items: UndoItem['items'] = [];
   products.forEach((p) => {
-    if (p.countedQty !== null || p.countedQty2 != null) {
-      items!.push({ id: p.id, prev: p.countedQty, prevCountedQty2: p.countedQty2 ?? null });
+    if (p.countedQty !== null) {
+      items!.push({ id: p.id, prev: p.countedQty });
+      p.countedQty = null;
     }
-    p.countedQty = null;
     if (p.countedQty2 != null) p.countedQty2 = null;
   });
 

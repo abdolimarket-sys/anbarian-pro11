@@ -71,8 +71,6 @@ import {
   exportDoubleCountMismatches,
   exportStockAlerts,
   exportDiffsExcel,
-  exportBarcodeQuantityExcel,
-  initAccountingTemplateUI,
 } from './modules/reports';
 import {
   captureProductPhoto,
@@ -91,7 +89,6 @@ import {
   exportTeamConflictReport,
   refreshTeamSyncUI,
 } from './modules/team-sync';
-import { fillLiveConfigForm, getTeamSyncMode, setTeamSyncMode, saveLiveConfig, startLiveSync, stopLiveSync, notifyTeamLiveChange } from './modules/team-live';
 import {
   openProductModal,
   offerAddProduct,
@@ -251,13 +248,11 @@ async function bootApp() {
     console.log('[Anbarin] boot source:', source, '| products:', products.length);
 
     renderShell();
-    if (getTeamSyncMode() === 'live') void startLiveSync();
     initScannerModule();
     setCountChangeListener(() => {
       updateHeader();
       updateUndoBtn();
       refreshLists();
-      notifyTeamLiveChange();
     });
     updateHeader();
     updateCapsInfo();
@@ -315,12 +310,9 @@ function renderShell() {
     <header>
       <div class="header-top">
         <div class="logo-area">
-          <img class="app-logo" src="./logo.png" alt="لوگوی انبارین" width="42" height="42" decoding="async" />
-          <div class="logo-copy">
-            <strong>انبارین</strong>
-            <span class="version">نسخه ۱.۴.۲</span>
-            <span class="role-badge" id="roleBadge">—</span>
-          </div>
+          <strong>انبارین</strong>
+          <span class="version">v1.4.1</span>
+          <span class="role-badge" id="roleBadge">—</span>
         </div>
         <div class="header-stats" id="headerStats"></div>
       </div>
@@ -396,23 +388,9 @@ function renderShell() {
           <div class="actions" style="margin-top:14px">
             <button class="btn btn-primary btn-block" id="btnCopyReport">📋 کپی خلاصه گزارش</button>
             <button class="btn btn-success btn-block" id="btnExportDiffs">📥 اکسل مغایرت‌ها</button>
-            <button class="btn btn-secondary btn-block" id="btnExportBarcodeQuantity">📊 اکسل فقط بارکد و مقدار</button>
             <button class="btn btn-secondary btn-block" id="btnAccGeneric">📒 سند اصلاح (عمومی)</button>
             <button class="btn btn-secondary btn-block" id="btnAccHeloo">📒 قالب هلو</button>
             <button class="btn btn-secondary btn-block" id="btnAccSepidar">📒 قالب سپیدار</button>
-            <details class="card" style="margin-top:10px;padding:12px">
-              <summary style="cursor:pointer;font-weight:700">⚙️ تنظیم ستون‌های خروجی اکسل هلو و سپیدار</summary>
-              <p class="hint" style="margin:8px 0">قالب هر نرم‌افزار جداگانه ذخیره می‌شود. خروجی شامل کالاهای شمارش‌شده است و ستون «موجودی شمارش‌شده» مقدار نهایی شمارش را نشان می‌دهد.</p>
-              <label for="accountingTemplateTarget">قالب مقصد</label>
-              <select id="accountingTemplateTarget" class="search-input" style="margin:6px 0 10px;width:100%">
-                <option value="heloo">هلو</option><option value="sepidar">سپیدار</option>
-              </select>
-              <div id="accountingTemplateFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:2px"></div>
-              <div class="actions" style="margin-top:10px">
-                <button class="btn btn-secondary btn-block" id="btnSaveAccountingTemplate" type="button">💾 ذخیره قالب انتخابی</button>
-                <button class="btn btn-primary btn-block" id="btnExportAccountingTemplate" type="button">📊 خروجی اکسل با ستون‌های انتخابی</button>
-              </div>
-            </details>
             <button class="btn btn-secondary btn-block" id="btnDoubleDiff">📥 اختلاف فاز ۱ و ۲</button>
             <button class="btn btn-secondary btn-block" id="btnStockAlerts">⚠️ هشدار موجودی</button>
             <button class="btn btn-secondary btn-block" id="btnPrintLabels">🏷️ چاپ لیبل بارکد (تا ۵۰)</button>
@@ -494,16 +472,6 @@ function renderShell() {
 
         <div class="card" style="margin-top:12px">
           <h2>همگام‌سازی تیمی</h2>
-          <p class="hint">روش را انتخاب کنید: آفلاین برای انتقال فایل بدون اینترنت، یا زنده برای تبادل خودکار شمارش از طریق اینترنت. اطلاعات کالاها و شمارش ابتدا روی همین دستگاه ذخیره می‌شود.</p>
-          <label class="set-row" style="margin-top:10px"><span>روش همگام‌سازی</span><select id="teamSyncMode"><option value="offline">آفلاین — انتقال فایل</option><option value="live">زنده — اینترنت</option></select></label>
-          <div id="teamLiveConfig" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:10px">
-            <p class="hint">برای حالت زنده، پروژه Supabase و جدول همگام‌سازی را طبق فایل LIVE_SYNC_SETUP_FA.md راه‌اندازی کنید. فقط کلید عمومی anon/publishable را وارد کنید؛ کلید secret را وارد نکنید.</p>
-            <label class="field" style="display:block;margin-top:8px"><span>آدرس پروژه Supabase</span><input id="teamSupabaseUrl" type="url" placeholder="https://xxxx.supabase.co" style="width:100%;direction:ltr;text-align:left;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" /></label>
-            <label class="field" style="display:block;margin-top:8px"><span>کلید عمومی (anon / publishable)</span><input id="teamSupabaseKey" type="password" placeholder="کلید عمومی پروژه" autocomplete="off" style="width:100%;direction:ltr;text-align:left;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" /></label>
-            <div class="actions" style="margin-top:8px"><button class="btn btn-secondary btn-block" id="btnSaveLiveConfig">ذخیره تنظیمات</button><button class="btn btn-primary btn-block" id="btnStartLiveSync">اتصال زنده</button><button class="btn btn-secondary btn-block" id="btnStopLiveSync">قطع اتصال زنده</button></div>
-            <p class="hint" id="teamLiveStatus" role="status">همگام‌سازی زنده متوقف است</p>
-          </div>
-          <p class="hint" id="teamOfflineHint">حالت آفلاین: بسته JSON را صادر و در دستگاه دیگر وارد کنید. برای شمارش تکراری «بیشینه» و برای بخش‌های جداگانه «جمع» را انتخاب کنید.</p>
           <p class="hint" id="teamSyncInfo">—</p>
           <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
             <input type="text" id="teamSessionCode" readonly style="flex:1;direction:ltr;text-align:left;font-family:monospace;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text)" />
@@ -516,8 +484,8 @@ function renderShell() {
           <label class="set-row" style="margin-top:10px">
             <span>حالت ادغام تداخل</span>
             <select id="teamMergeMode">
-              <option value="max">بیشینه (max) — پیش‌فرض امن‌تر برای شمارش تکراری</option>
-              <option value="sum">جمع (sum) — فقط برای مقادیر جداگانه</option>
+              <option value="sum">جمع (sum)</option>
+              <option value="max">بیشینه (max)</option>
               <option value="incoming">فایل ورودی</option>
               <option value="local">مقدار محلی</option>
             </select>
@@ -610,32 +578,6 @@ function renderShell() {
 }
 
 function bindEvents() {
-  // جلسه جدید و بستن جلسه قبلاً فقط در رابط کاربری نمایش داده می‌شدند؛
-  // رویداد کلیک آن‌ها به عملیات واقعی متصل نبود.
-  document.getElementById('btnStartSession')?.addEventListener('click', () => {
-    try {
-      if (!guardWrite('شروع جلسه جدید')) return;
-      actionStartSession();
-      updateHeader();
-      refreshLists();
-      updateUndoBtn();
-    } catch (err) {
-      console.error('[Anbarin] start session failed:', err);
-      toast('شروع جلسه جدید انجام نشد؛ دوباره تلاش کنید', 'error');
-    }
-  });
-  document.getElementById('btnCloseSession')?.addEventListener('click', () => {
-    try {
-      if (!guardWrite('بستن جلسه')) return;
-      actionCloseSession();
-      updateHeader();
-      refreshLists();
-      updateUndoBtn();
-    } catch (err) {
-      console.error('[Anbarin] close session failed:', err);
-      toast('بستن جلسه انجام نشد؛ دوباره تلاش کنید', 'error');
-    }
-  });
   document.getElementById('btnSaveSettings')?.addEventListener('click', () => {
     try {
       applySettingsFromForm();
@@ -859,31 +801,6 @@ function bindEvents() {
     refreshLists();
   });
 
-  // Team sync mode: offline file transfer or optional live Supabase sync
-  fillLiveConfigForm();
-  const syncModeEl = document.getElementById('teamSyncMode') as HTMLSelectElement | null;
-  const liveConfigEl = document.getElementById('teamLiveConfig');
-  const offlineHintEl = document.getElementById('teamOfflineHint');
-  const updateSyncModeUI = () => {
-    const live = getTeamSyncMode() === 'live';
-    if (syncModeEl) syncModeEl.value = live ? 'live' : 'offline';
-    if (liveConfigEl) liveConfigEl.style.display = live ? 'block' : 'none';
-    if (offlineHintEl) offlineHintEl.style.display = live ? 'none' : 'block';
-  };
-  updateSyncModeUI();
-  syncModeEl?.addEventListener('change', () => { setTeamSyncMode(syncModeEl.value === 'live' ? 'live' : 'offline'); updateSyncModeUI(); });
-  document.getElementById('btnSaveLiveConfig')?.addEventListener('click', () => {
-    const url = (document.getElementById('teamSupabaseUrl') as HTMLInputElement | null)?.value || '';
-    const key = (document.getElementById('teamSupabaseKey') as HTMLInputElement | null)?.value || '';
-    if (saveLiveConfig(url, key)) setTeamSyncMode('live');
-    updateSyncModeUI();
-  });
-  document.getElementById('btnStartLiveSync')?.addEventListener('click', async () => {
-    setTeamSyncMode('live'); updateSyncModeUI(); await startLiveSync();
-  });
-  document.getElementById('btnStopLiveSync')?.addEventListener('click', () => stopLiveSync());
-  window.addEventListener('anbar-live-counts-updated', () => { updateHeader(); updateUndoBtn(); refreshLists(); });
-
   // Team sync
   document.getElementById('btnCopyTeamCode')?.addEventListener('click', () => copyTeamSessionCode());
   document.getElementById('btnJoinSession')?.addEventListener('click', () => {
@@ -931,11 +848,9 @@ function bindEvents() {
   // Reports
   document.getElementById('btnCopyReport')?.addEventListener('click', () => copyTextReport());
   document.getElementById('btnExportDiffs')?.addEventListener('click', () => exportDiffsExcel());
-  document.getElementById('btnExportBarcodeQuantity')?.addEventListener('click', () => exportBarcodeQuantityExcel());
   document.getElementById('btnAccGeneric')?.addEventListener('click', () => exportAccountingDoc('generic'));
   document.getElementById('btnAccHeloo')?.addEventListener('click', () => exportAccountingDoc('heloo'));
   document.getElementById('btnAccSepidar')?.addEventListener('click', () => exportAccountingDoc('sepidar'));
-  initAccountingTemplateUI();
   document.getElementById('btnDoubleDiff')?.addEventListener('click', () => exportDoubleCountMismatches());
   document.getElementById('btnStockAlerts')?.addEventListener('click', () => exportStockAlerts());
 
@@ -972,42 +887,6 @@ function bindEvents() {
   });
   document.getElementById('btnExportCsv')?.addEventListener('click', () => exportCSV(false));
   document.getElementById('btnExportJson')?.addEventListener('click', () => exportJSON());
-
-  // دکمه‌های لایسنس و شناسه دستگاه نیز باید عملکرد واقعی داشته باشند.
-  document.getElementById('btnActivateLicense')?.addEventListener('click', () => {
-    try {
-      if (activateLicenseFromInput()) updateHeader();
-    } catch (err) {
-      console.error('[Anbarin] license activation failed:', err);
-      toast('فعال‌سازی لایسنس انجام نشد؛ کلید را بررسی کنید', 'error');
-    }
-  });
-  document.getElementById('btnDeactivateLicense')?.addEventListener('click', () => {
-    try {
-      deactivateLicense();
-      updateHeader();
-    } catch (err) {
-      console.error('[Anbarin] license deactivation failed:', err);
-      toast('حذف لایسنس انجام نشد', 'error');
-    }
-  });
-  document.getElementById('btnCopyDeviceId')?.addEventListener('click', async () => {
-    const deviceId = getDeviceId();
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(deviceId);
-      } else {
-        const input = document.getElementById('deviceIdDisplay') as HTMLInputElement | null;
-        input?.focus();
-        input?.select();
-        if (!document.execCommand('copy')) throw new Error('Clipboard unavailable');
-      }
-      toast('شناسه دستگاه کپی شد', 'success');
-    } catch (err) {
-      console.error('[Anbarin] copy device ID failed:', err);
-      toast('کپی خودکار ممکن نشد؛ شناسه را دستی انتخاب و کپی کنید', 'error');
-    }
-  });
 
   document.querySelectorAll('.nav-item').forEach((btn) => {
     btn.addEventListener('click', () => {

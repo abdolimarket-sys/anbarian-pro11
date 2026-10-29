@@ -169,19 +169,9 @@ export function fillLocationSelect(selectId = 'locationFilterSelect'): void {
   if (!sel) return;
   const current = sel.value;
   const locs = collectLocations();
-
-  // نام محل ممکن است از فایل اکسل یا ورودی کاربر آمده باشد؛ آن را به‌صورت متن
-  // درج می‌کنیم تا کاراکترهای HTML به‌عنوان کد اجرا یا تفسیر نشوند.
-  const allOption = document.createElement('option');
-  allOption.value = '';
-  allOption.textContent = 'همه محل‌ها';
-  sel.replaceChildren(allOption);
-  for (const loc of locs) {
-    const option = document.createElement('option');
-    option.value = loc;
-    option.textContent = loc;
-    sel.appendChild(option);
-  }
+  sel.innerHTML =
+    '<option value="">همه محل‌ها</option>' +
+    locs.map((l) => `<option value="${l.replace(/"/g, '&quot;')}">${l}</option>`).join('');
   if (current && locs.includes(current)) sel.value = current;
   else if (locationFilter && locs.includes(locationFilter)) sel.value = locationFilter;
 }
