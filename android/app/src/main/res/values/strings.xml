@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">انبارین</string>
+    <string name="title_activity_main">انبارین</string>
+    <string name="package_name">ir.azar.anbar</string>
+    <string name="custom_url_scheme">ir.azar.anbar</string>
+</resources>
