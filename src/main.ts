@@ -89,6 +89,11 @@ import {
   joinTeamSession,
   exportTeamConflictReport,
   refreshTeamSyncUI,
+  saveTeamOnlineConfig,
+  saveTeamSyncMode,
+  syncTeamOnlineNow,
+  refreshTeamOnlineStatus,
+  initializeTeamOnlineSync,
 } from './modules/team-sync';
 import {
   openProductModal,
@@ -259,6 +264,7 @@ async function bootApp() {
     updateCapsInfo();
     updateUndoBtn();
     fillSettingsForm();
+    updateRolePreview();
     refreshLists();
     loadSheetJS().then((ok) => console.log('[Anbarin] SheetJS:', ok));
 
@@ -311,9 +317,10 @@ function renderShell() {
     <header>
       <div class="header-top">
         <div class="logo-area">
-          <strong>انبارین</strong>
+          <img class="brand-logo" src="./logo.png" alt="لوگوی انبارین" />
+          <div class="brand-title"><strong>انبارین</strong>
           <span class="version">v1.4.1</span>
-          <span class="role-badge" id="roleBadge">—</span>
+          <span class="role-badge" id="roleBadge">—</span></div>
         </div>
         <div class="header-stats" id="headerStats"></div>
       </div>
@@ -449,13 +456,26 @@ function renderShell() {
             <label class="set-row"><span>شمارش کور (بدون نمایش مغایرت)</span><input type="checkbox" id="setBlind" /></label>
             <label class="set-row"><span>اسکنر USB/Bluetooth</span><input type="checkbox" id="setBt" /></label>
             <label class="set-row"><span>شمارش دوفازی</span><input type="checkbox" id="setDouble" /></label>
-            <label class="set-row"><span>نقش</span>
-              <select id="setRole">
-                <option value="admin">مدیر</option>
-                <option value="counter">شمارنده</option>
-                <option value="viewer">مشاهده‌گر</option>
-              </select>
-            </label>
+            <div class="role-settings-panel" id="roleSettingsPanel">
+              <div class="role-settings-heading">
+                <div>
+                  <strong>نقش و سطح دسترسی</strong>
+                  <p>نقش را انتخاب کنید؛ دسترسی‌ها پس از ذخیره دوباره اعمال و بررسی می‌شوند.</p>
+                </div>
+                <span class="role-current-pill" id="rolePreviewPill">مدیر</span>
+              </div>
+              <label class="set-row" for="setRole"><span>نقش کاربر</span>
+                <select id="setRole" aria-describedby="rolePreviewDescription">
+                  <option value="admin">مدیر</option>
+                  <option value="counter">شمارنده</option>
+                  <option value="viewer">مشاهده‌گر</option>
+                </select>
+              </label>
+              <p class="role-preview-description" id="rolePreviewDescription" aria-live="polite">دسترسی کامل به تنظیمات و عملیات مدیریتی.</p>
+              <div class="role-permission-list" id="rolePermissionList" aria-live="polite">
+                <span>✓ مدیریت تنظیمات و مجوزها</span><span>✓ شمارش و ویرایش کالا</span><span>✓ ورود و خروج اطلاعات</span>
+              </div>
+            </div>
             <label class="set-row"><span>انبار فعال</span><input type="text" id="setWarehouse" /></label>
             <label class="set-row"><span>نام اپراتور</span><input type="text" id="setOperator" placeholder="نام شما" /></label>
           </div>
@@ -504,6 +524,24 @@ function renderShell() {
               <option value="local">مقدار محلی</option>
             </select>
           </label>
+          <div class="card" style="margin-top:12px;padding:12px;background:var(--bg)">
+            <h3 style="margin:0 0 8px">انتخاب روش همگام‌سازی تیمی</h3>
+            <label class="field" style="display:block;margin-top:8px"><span>روش کار</span>
+              <select id="teamSyncMode" style="width:100%">
+                <option value="offline">آفلاین — انتقال با فایل JSON</option>
+                <option value="live">آنلاین زنده — همگام‌سازی خودکار</option>
+                <option value="hybrid">ترکیبی — آنلاین خودکار + ابزار آفلاین</option>
+              </select>
+            </label>
+            <p class="hint">حالت آنلاین زنده در این نسخه با بررسی خودکار دوره‌ای Firebase کار می‌کند، نه WebSocket/Supabase. در حالت ترکیبی، فایل‌های JSON هم برای انتقال دستی در دسترس می‌مانند. در قطع اینترنت، شمارش محلی حفظ می‌شود.</p>
+            <label class="field" style="display:block;margin-top:8px"><span>نشانی پایگاه داده آنلاین</span><input id="teamOnlineUrl" type="url" placeholder="https://your-project-default-rtdb.firebaseio.com" style="width:100%;direction:ltr;text-align:left" /></label>
+            <label class="field" style="display:block;margin-top:8px"><span>توکن دسترسی (در صورت نیاز)</span><input id="teamOnlineToken" type="password" placeholder="اختیاری؛ مطابق تنظیمات پایگاه داده" style="width:100%;direction:ltr;text-align:left" autocomplete="off" /></label>
+            <div class="actions" style="margin-top:8px">
+              <button class="btn btn-secondary btn-block" id="btnSaveTeamOnline">ذخیره تنظیمات آنلاین</button>
+              <button class="btn btn-primary btn-block" id="btnSyncTeamOnline">همگام‌سازی آنلاین اکنون</button>
+            </div>
+            <p class="hint" id="teamOnlineStatus" role="status" aria-live="polite">همگام‌سازی آنلاین تنظیم نشده است.</p>
+          </div>
           <div class="actions" style="margin-top:12px">
             <button class="btn btn-primary btn-block" id="btnExportTeam">📤 ارسال بسته همگام‌سازی</button>
             <button class="btn btn-secondary btn-block" id="btnImportTeam">📥 دریافت و ادغام بسته</button>
@@ -592,12 +630,45 @@ function renderShell() {
 }
 
 function bindEvents() {
+  // Session controls: ensure both visible buttons are wired to their actions.
+  // Refresh dependent UI only after the action returns; preserve existing state/data.
+  document.getElementById('btnStartSession')?.addEventListener('click', () => {
+    if (!guardWrite('شروع جلسه جدید')) return;
+    try {
+      actionStartSession();
+      updateHeader();
+      refreshLists();
+      updateUndoBtn();
+      refreshTeamSyncUI();
+    } catch (err) {
+      console.error('[Anbarin] start session failed:', err);
+      toast('شروع جلسه جدید انجام نشد؛ اطلاعات ذخیره‌سازی را بررسی کنید', 'error');
+    }
+  });
+  document.getElementById('btnCloseSession')?.addEventListener('click', () => {
+    if (!guardWrite('بستن جلسه')) return;
+    try {
+      actionCloseSession();
+      updateHeader();
+      refreshLists();
+      updateUndoBtn();
+      refreshTeamSyncUI();
+    } catch (err) {
+      console.error('[Anbarin] close session failed:', err);
+      toast('بستن جلسه انجام نشد؛ دوباره تلاش کنید', 'error');
+    }
+  });
+  document.getElementById('setRole')?.addEventListener('change', () => {
+    // پیش‌نمایش فقط نمایشی است؛ سطح دسترسی واقعی پس از ذخیره از تنظیمات معتبر خوانده می‌شود.
+    updateRolePreview();
+  });
   document.getElementById('btnSaveSettings')?.addEventListener('click', () => {
     try {
       applySettingsFromForm();
       // هم نشان نقش و هم محدودیت‌های UI را بلافاصله با نقش جدید هماهنگ کن.
       updateHeader();
       fillSettingsForm();
+      updateRolePreview();
       refreshLists();
     } catch (err) {
       console.error('[Anbarin] saving settings failed:', err);
@@ -815,7 +886,22 @@ function bindEvents() {
     refreshLists();
   });
 
-  // Team sync
+  // Team sync: keep offline JSON tools and let the user choose offline, live, or hybrid.
+  document.getElementById('teamSyncMode')?.addEventListener('change', () => {
+    saveTeamSyncMode();
+    refreshTeamOnlineStatus();
+    initializeTeamOnlineSync();
+  });
+  document.getElementById('btnSaveTeamOnline')?.addEventListener('click', () => {
+    saveTeamOnlineConfig();
+    refreshTeamOnlineStatus();
+  });
+  document.getElementById('btnSyncTeamOnline')?.addEventListener('click', async () => {
+    await syncTeamOnlineNow();
+    updateHeader();
+    refreshLists();
+    refreshTeamSyncUI();
+  });
   document.getElementById('btnCopyTeamCode')?.addEventListener('click', () => copyTeamSessionCode());
   document.getElementById('btnJoinSession')?.addEventListener('click', () => {
     if (joinTeamSession()) {
@@ -920,6 +1006,42 @@ function bindEvents() {
   if (cont) cont.checked = settings.continuousScan !== false;
 }
 
+function updateRolePreview(): void {
+  const select = document.getElementById('setRole') as HTMLSelectElement | null;
+  const description = document.getElementById('rolePreviewDescription');
+  const pill = document.getElementById('rolePreviewPill');
+  const list = document.getElementById('rolePermissionList');
+  if (!select) return;
+  const role = select.value;
+  const roles: Record<string, { label: string; description: string; permissions: string[] }> = {
+    admin: {
+      label: 'مدیر',
+      description: 'دسترسی کامل به تنظیمات و عملیات مدیریتی؛ مناسب مسئول اصلی انبار.',
+      permissions: ['✓ مدیریت تنظیمات و مجوزها', '✓ شمارش، ویرایش و ورود اطلاعات', '✓ عملیات حساس مدیریتی'],
+    },
+    counter: {
+      label: 'شمارنده',
+      description: 'مناسب تیم شمارش؛ امکان ثبت شمارش و کار با کالاها، بدون عملیات مدیریتی حساس.',
+      permissions: ['✓ شمارش و ویرایش شمارش', '✓ اسکن و مشاهده کالاها', '— عملیات حساس مدیریتی محدود است'],
+    },
+    viewer: {
+      label: 'مشاهده‌گر',
+      description: 'فقط مشاهده اطلاعات؛ دکمه‌های تغییر داده و عملیات شمارش غیرفعال می‌شوند.',
+      permissions: ['✓ مشاهده کالاها و گزارش‌ها', '— ثبت یا تغییر شمارش', '— ورود اطلاعات و عملیات مدیریتی'],
+    },
+  };
+  const selected = roles[role] || roles.admin;
+  if (description) description.textContent = selected.description;
+  if (pill) pill.textContent = selected.label;
+  if (list) {
+    list.replaceChildren(...selected.permissions.map((permission) => {
+      const item = document.createElement('span');
+      item.textContent = permission;
+      return item;
+    }));
+  }
+}
+
 function updateHeader() {
   const stats = getCountStats();
   const el = document.getElementById('headerStats');
@@ -961,6 +1083,8 @@ function updateHeader() {
   const pci = document.getElementById('photoCountInfo');
   if (pci) pci.textContent = 'عکس‌های ذخیره‌شده: ' + countPhotos();
   refreshTeamSyncUI();
+  initializeTeamOnlineSync();
+  refreshTeamOnlineStatus();
   updateLicenseUI();
   applyRoleUI();
 }

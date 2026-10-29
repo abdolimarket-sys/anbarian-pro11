@@ -393,3 +393,246 @@ export function refreshTeamSyncUI(): void {
       (settings.currentWarehouse || '—');
   }
 }
+
+// Optional Firebase Realtime Database transport. Local counting and JSON import/export
+// continue to work without this configuration or an internet connection.
+interface TeamOnlineConfig { url: string; token: string }
+interface RemoteDevicePack extends TeamSyncPack { deviceId: string }
+const ONLINE_CONFIG_KEY = 'anbar_team_online_config_v1';
+const DEVICE_KEY = 'anbar_team_device_id_v1';
+const SYNC_MODE_KEY = 'anbar_team_sync_mode_v1';
+type TeamSyncMode = 'offline' | 'live' | 'hybrid';
+let autoSyncTimer: number | null = null;
+const REMOTE_CACHE_PREFIX = 'anbar_team_remote_cache_v1:';
+let onlineSyncBusy = false;
+let onlineSyncInitialized = false;
+
+function onlineConfig(): TeamOnlineConfig {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ONLINE_CONFIG_KEY) || '{}');
+    return { url: String(parsed.url || '').trim().replace(/\/+$/, ''), token: String(parsed.token || '').trim() };
+  } catch { return { url: '', token: '' }; }
+}
+
+function deviceId(): string {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = generateId('device');
+    try { localStorage.setItem(DEVICE_KEY, id); } catch { /* device id remains in memory only */ }
+  }
+  return id;
+}
+
+function firebaseUrl(path: string): string {
+  const cfg = onlineConfig();
+  const url = `${cfg.url}/${path.split('/').map(encodeURIComponent).join('/')}.json`;
+  if (!cfg.token) return url;
+  return `${url}?auth=${encodeURIComponent(cfg.token)}`;
+}
+
+function setOnlineStatus(message: string, isError = false): void {
+  const el = document.getElementById('teamOnlineStatus');
+  if (el) {
+    el.textContent = message;
+    el.style.color = isError ? 'var(--danger, #b42318)' : '';
+  }
+}
+
+function currentTeamSyncMode(): TeamSyncMode {
+  const raw = localStorage.getItem(SYNC_MODE_KEY);
+  return raw === 'live' || raw === 'hybrid' ? raw : 'offline';
+}
+
+export function saveTeamSyncMode(): void {
+  const el = document.getElementById('teamSyncMode') as HTMLSelectElement | null;
+  const mode: TeamSyncMode = el?.value === 'live' || el?.value === 'hybrid' ? el.value : 'offline';
+  try { localStorage.setItem(SYNC_MODE_KEY, mode); } catch { /* current selection still applies until reload */ }
+  configureAutoSync();
+  refreshTeamOnlineStatus();
+  toast(mode === 'offline' ? 'حالت آفلاین انتخاب شد' : mode === 'live' ? 'همگام‌سازی زنده انتخاب شد' : 'حالت ترکیبی انتخاب شد', 'success');
+}
+
+export function saveTeamOnlineConfig(): void {
+  const urlEl = document.getElementById('teamOnlineUrl') as HTMLInputElement | null;
+  const tokenEl = document.getElementById('teamOnlineToken') as HTMLInputElement | null;
+  const url = (urlEl?.value || '').trim().replace(/\/+$/, '');
+  const token = (tokenEl?.value || '').trim();
+  if (url && !/^https:\/\//i.test(url)) {
+    toast('نشانی پایگاه داده باید با https:// شروع شود', 'error');
+    return;
+  }
+  try {
+    localStorage.setItem(ONLINE_CONFIG_KEY, JSON.stringify({ url, token }));
+    configureAutoSync();
+    toast(url ? 'تنظیمات همگام‌سازی آنلاین ذخیره شد' : 'تنظیمات آنلاین پاک شد؛ برای کار آفلاین حالت آفلاین را انتخاب کنید', 'success');
+    refreshTeamOnlineStatus();
+  } catch {
+    toast('ذخیره تنظیمات آنلاین در این دستگاه ممکن نشد', 'error');
+  }
+}
+
+export function refreshTeamOnlineStatus(): void {
+  const cfg = onlineConfig();
+  const urlEl = document.getElementById('teamOnlineUrl') as HTMLInputElement | null;
+  const tokenEl = document.getElementById('teamOnlineToken') as HTMLInputElement | null;
+  if (urlEl && document.activeElement !== urlEl) urlEl.value = cfg.url;
+  if (tokenEl && document.activeElement !== tokenEl) tokenEl.value = cfg.token;
+  const mode = currentTeamSyncMode();
+  const modeText = mode === 'offline' ? 'حالت انتخابی: آفلاین.' : mode === 'live' ? 'حالت انتخابی: آنلاین زنده.' : 'حالت انتخابی: ترکیبی.';
+  if (urlEl && document.activeElement !== urlEl) { /* retain saved URL above */ }
+  if (mode === 'offline') setOnlineStatus(`${modeText} همگام‌سازی خودکار خاموش است؛ فایل JSON و شمارش محلی فعال‌اند.`);
+  else if (!cfg.url) setOnlineStatus(`${modeText} برای همگام‌سازی آنلاین، ابتدا نشانی Firebase را وارد و ذخیره کنید.`, true);
+  else if (!navigator.onLine) setOnlineStatus(`${modeText} اینترنت قطع است؛ شمارش محلی حفظ می‌شود و همگام‌سازی خودکار پس از اتصال از سر گرفته می‌شود.`);
+  else setOnlineStatus(`${modeText} همگام‌سازی خودکار هر 5 ثانیه بررسی می‌شود؛ می‌توانید دستی هم همگام‌سازی کنید.`);
+}
+
+function makeOnlinePack(): RemoteDevicePack {
+  ensureSession();
+  let previous: Record<string, { q1: number; q2: number }> = {};
+  try { previous = JSON.parse(localStorage.getItem(REMOTE_CACHE_PREFIX + (session?.id || '')) || '{}'); } catch { previous = {}; }
+  // Publish this device's own contribution only, not the remote counts already merged locally.
+  const counted = products.map(p => {
+    const old = previous[productKey({ code: p.code, sku: p.sku, name: p.name })] || { q1: 0, q2: 0 };
+    const q1 = p.countedQty == null ? null : Number(p.countedQty) - old.q1;
+    const q2 = p.countedQty2 == null ? null : Number(p.countedQty2) - old.q2;
+    return { p, q1, q2 };
+  }).filter(x => x.q1 !== null || x.q2 !== null);
+  return {
+    type: 'anbar-team-sync', version: 4, sessionId: session?.id || '',
+    warehouse: settings.currentWarehouse || '', operator: getOperatorName(), role: settings.role,
+    deviceId: deviceId(), exportedAt: new Date().toISOString(), countTotal: counted.length,
+    counts: counted.map(({ p, q1, q2 }) => ({ code: p.code || '', sku: p.sku || '', name: p.name,
+      countedQty: q1, countedQty2: q2, systemQty: p.systemQty,
+      location: p.location || '', warehouse: p.warehouse || settings.currentWarehouse || '',
+      note: p.note || '', price: p.price || 0, updatedAt: p.countUpdatedAt || null }))
+  };
+}
+
+function productKey(c: { code?: string; sku?: string; name?: string }): string {
+  if (c.code?.trim()) return 'code:' + c.code.trim().toLowerCase();
+  if (c.sku?.trim()) return 'sku:' + c.sku.trim().toLowerCase();
+  return 'name:' + (c.name || '').trim().toLowerCase();
+}
+
+/** Push this device's contribution and reconcile latest contributions from other devices.
+ * The per-device layout prevents repeatedly pulling the same counts from adding them twice. */
+export async function syncTeamOnlineNow(quiet = false): Promise<void> {
+  if (onlineSyncBusy) return;
+  const cfg = onlineConfig();
+  if (!cfg.url) {
+    setOnlineStatus('ابتدا نشانی Firebase Realtime Database را وارد و ذخیره کنید.', true);
+    toast('تنظیمات همگام‌سازی آنلاین کامل نیست', 'error');
+    return;
+  }
+  if (!navigator.onLine) {
+    setOnlineStatus('اینترنت در دسترس نیست؛ داده‌ها محلی حفظ شده‌اند.', true);
+    toast('اینترنت قطع است؛ حالت آفلاین فعال است', 'info');
+    return;
+  }
+  onlineSyncBusy = true;
+  const button = document.getElementById('btnSyncTeamOnline') as HTMLButtonElement | null;
+  if (button) button.disabled = true;
+  setOnlineStatus('در حال ارسال و دریافت شمارش‌های تیم…');
+  try {
+    const pack = makeOnlinePack();
+    if (!pack.sessionId) throw new Error('شناسه جلسه موجود نیست');
+    const root = `teams/${pack.sessionId}`;
+    const put = await fetch(firebaseUrl(`${root}/devices/${pack.deviceId}`), {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pack), cache: 'no-store'
+    });
+    if (!put.ok) throw new Error(`ارسال آنلاین ناموفق بود (HTTP ${put.status})`);
+    const get = await fetch(firebaseUrl(`${root}/devices`), { cache: 'no-store' });
+    if (!get.ok) throw new Error(`دریافت آنلاین ناموفق بود (HTTP ${get.status})`);
+    const remote = await get.json() as Record<string, RemoteDevicePack> | null;
+    const all = Object.values(remote || {}).filter(p => p && p.deviceId !== pack.deviceId && Array.isArray(p.counts));
+    const totals = new Map<string, { item: TeamCountItem; q1: number; q2: number }>();
+    for (const rp of all) for (const c of rp.counts) {
+      const key = productKey(c);
+      if (key === 'name:') continue;
+      const item = totals.get(key) || { item: c, q1: 0, q2: 0 };
+      if (c.countedQty !== null && c.countedQty !== undefined) item.q1 += Number(c.countedQty) || 0;
+      if (c.countedQty2 !== null && c.countedQty2 !== undefined) item.q2 += Number(c.countedQty2) || 0;
+      totals.set(key, item);
+    }
+    const cacheKey = REMOTE_CACHE_PREFIX + pack.sessionId;
+    let previous: Record<string, { q1: number; q2: number }> = {};
+    try { previous = JSON.parse(localStorage.getItem(cacheKey) || '{}'); } catch { previous = {}; }
+    const nextCache: Record<string, { q1: number; q2: number }> = {};
+    const byKey = new Map<string, number>();
+    products.forEach((p, i) => {
+      byKey.set(productKey({ code: p.code, sku: p.sku, name: p.name }), i);
+    });
+    for (const [key, total] of totals) {
+      nextCache[key] = { q1: total.q1, q2: total.q2 };
+      let idx = byKey.get(key);
+      if (idx === undefined) {
+        const c = total.item;
+        const np: Product = {
+          id: generateId('sync'), name: c.name || 'کالای همگام‌شده', code: c.code || '', sku: c.sku || '',
+          unit: 'عدد', systemQty: Number(c.systemQty) || 0, price: Number(c.price) || 0,
+          location: c.location || '', warehouse: c.warehouse || settings.currentWarehouse || 'انبار اصلی',
+          note: c.note || '', countedQty: null, countedQty2: null, createdAt: new Date().toISOString()
+        };
+        products.push(np); idx = products.length - 1; byKey.set(key, idx);
+      }
+      const p = products[idx];
+      const old = previous[key] || { q1: 0, q2: 0 };
+      const local1 = p.countedQty == null ? 0 : Number(p.countedQty) - old.q1;
+      const local2 = p.countedQty2 == null ? 0 : Number(p.countedQty2) - old.q2;
+      p.countedQty = (p.countedQty == null && total.q1 === 0 && old.q1 === 0) ? null : local1 + total.q1;
+      p.countedQty2 = (p.countedQty2 == null && total.q2 === 0 && old.q2 === 0) ? null : local2 + total.q2;
+      p.countUpdatedAt = new Date().toISOString();
+    }
+    // Remove remote contribution from products that disappeared from the server.
+    for (const [key, old] of Object.entries(previous)) {
+      if (totals.has(key)) continue;
+      const idx = byKey.get(key);
+      if (idx === undefined) continue;
+      const p = products[idx];
+      if (p.countedQty != null) p.countedQty = Math.max(0, Number(p.countedQty) - old.q1);
+      if (p.countedQty2 != null) p.countedQty2 = Math.max(0, Number(p.countedQty2) - old.q2);
+    }
+    try { localStorage.setItem(cacheKey, JSON.stringify(nextCache)); } catch { /* sync still succeeds for this run */ }
+    rebuildIndex(); save(true); invalidateStats();
+    logAudit('team_online_sync', { sessionId: pack.sessionId, remoteDevices: all.length, remoteProducts: totals.size });
+    setOnlineStatus(`همگام‌سازی موفق · دستگاه‌های دیگر: ${all.length} · کالاهای دریافتی: ${totals.size} · ${new Date().toLocaleTimeString()}`);
+    if (!quiet) toast('همگام‌سازی آنلاین انجام شد', 'success');
+  } catch (err) {
+    console.error('[Anbarin] team online sync failed:', err);
+    const message = err instanceof Error ? err.message : 'خطای ناشناخته';
+    setOnlineStatus(`همگام‌سازی انجام نشد: ${message} · داده‌های محلی حفظ شده‌اند.`, true);
+    if (!quiet) toast('همگام‌سازی آنلاین ناموفق بود؛ اطلاعات محلی حذف نشده‌اند', 'error');
+  } finally {
+    onlineSyncBusy = false;
+    if (button) button.disabled = false;
+  }
+}
+
+function configureAutoSync(): void {
+  if (autoSyncTimer !== null) {
+    window.clearInterval(autoSyncTimer);
+    autoSyncTimer = null;
+  }
+  const mode = currentTeamSyncMode();
+  if (mode === 'offline') return;
+  autoSyncTimer = window.setInterval(() => {
+    if (document.visibilityState === 'hidden' || !navigator.onLine || !onlineConfig().url || onlineSyncBusy) return;
+    void syncTeamOnlineNow(true);
+  }, 5000);
+}
+
+export function initializeTeamOnlineSync(): void {
+  const modeEl = document.getElementById('teamSyncMode') as HTMLSelectElement | null;
+  if (modeEl) modeEl.value = currentTeamSyncMode();
+  if (!onlineSyncInitialized) {
+    onlineSyncInitialized = true;
+    window.addEventListener('online', () => {
+      refreshTeamOnlineStatus();
+      // Auto-sync resumes only when a live/hybrid mode is selected.
+      configureAutoSync();
+    });
+    window.addEventListener('offline', () => refreshTeamOnlineStatus());
+  }
+  configureAutoSync();
+  refreshTeamOnlineStatus();
+}

@@ -71,6 +71,12 @@ header {
   align-items: center;
 }
 
+
+.logo-area { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.logo-area .brand-logo { width: 44px; height: 44px; object-fit: contain; flex: 0 0 auto; border-radius: 8px; }
+.logo-area .brand-title { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
+.logo-area .role-badge { margin-inline-start: 2px; }
+
 .logo-area strong {
   font-size: 1.25rem;
   font-weight: 800;
@@ -618,4 +624,63 @@ main {
 }
 select.search-input {
   appearance: auto;
+}
+
+/* Role selector: clear, accessible permission preview without changing existing layout rules. */
+.role-settings-panel {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: linear-gradient(145deg, var(--card), var(--bg));
+}
+.role-settings-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.role-settings-heading strong { font-size: 1rem; }
+.role-settings-heading p,
+.role-preview-description {
+  margin: 5px 0 0;
+  color: var(--text-soft);
+  font-size: .82rem;
+  line-height: 1.7;
+}
+.role-current-pill {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-dark);
+  font-size: .78rem;
+  font-weight: 800;
+}
+.role-settings-panel .set-row { background: var(--card); }
+.role-preview-description {
+  padding: 8px 10px;
+  border-right: 3px solid var(--primary);
+  background: var(--primary-soft);
+  border-radius: 8px;
+}
+.role-permission-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 7px;
+  margin-top: 10px;
+}
+.role-permission-list span {
+  padding: 8px 9px;
+  border: 1px solid var(--border-light);
+  border-radius: 9px;
+  background: var(--card);
+  color: var(--text);
+  font-size: .78rem;
+  line-height: 1.5;
+}
+@media (max-width: 520px) {
+  .role-settings-panel { padding: 11px; }
+  .role-permission-list { grid-template-columns: 1fr; }
 }
