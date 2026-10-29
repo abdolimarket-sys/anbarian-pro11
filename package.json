@@ -1,0 +1,28 @@
+{
+  "name": "anbarin-app",
+  "private": true,
+  "version": "1.4.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "build:web": "tsc --noEmit && vite build",
+    "cap:sync": "npm run build:web && npx cap sync android",
+    "cap:open": "npx cap open android"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "typescript": "~5.6.3",
+    "vite": "^5.4.10",
+    "@capacitor/cli": "^6.2.0"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.2.0",
+    "@capacitor/android": "^6.2.0",
+    "@capacitor/camera": "^6.0.2",
+    "@capacitor/app": "^6.0.2",
+    "@capacitor/status-bar": "^6.0.2"
+  }
+}
