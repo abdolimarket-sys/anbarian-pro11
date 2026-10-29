@@ -3,9 +3,9 @@
  */
 
 import type { Product } from '@/types';
-import { products, settings, session, isDoubleCount } from './state';
+import { products, settings, session, isDoubleCount, logAudit } from './state';
 import { toast } from './ui';
-import { exportExcel, exportCSV, rowsToCSV } from './import-export';
+import { exportExcel, exportCSV, rowsToCSV, buildOfflineXlsx } from './import-export';
 import { downloadFile, dateStr, formatFaNumber } from '@/utils/helpers';
 import { getOperatorName } from './storage';
 
@@ -149,6 +149,110 @@ export function exportAccountingDoc(kind: 'generic' | 'heloo' | 'sepidar' = 'gen
   downloadFile(rowsToCSV(rows), `inventory-adjust-${dateStr()}.csv`, 'text/csv;charset=utf-8');
   toast('سند اصلاح موجودی دانلود شد', 'success');
 }
+
+export type AccountingTemplateKind = 'heloo' | 'sepidar';
+type AccountingField = 'barcode' | 'name' | 'code' | 'systemQty' | 'countedQty' | 'diff' | 'unitPrice' | 'diffValue' | 'unit' | 'location';
+const ACCOUNTING_FIELDS: Array<{ id: AccountingField; label: string }> = [
+  { id: 'barcode', label: 'بارکد' },
+  { id: 'name', label: 'نام کالا' },
+  { id: 'code', label: 'کد کالا' },
+  { id: 'systemQty', label: 'موجودی سیستم' },
+  { id: 'countedQty', label: 'موجودی شمارش‌شده' },
+  { id: 'diff', label: 'مغایرت' },
+  { id: 'unitPrice', label: 'قیمت واحد' },
+  { id: 'diffValue', label: 'ارزش مغایرت' },
+  { id: 'unit', label: 'واحد کالا' },
+  { id: 'location', label: 'محل کالا' },
+];
+const DEFAULT_ACCOUNTING_FIELDS: AccountingField[] = ACCOUNTING_FIELDS.map((f) => f.id);
+const TEMPLATE_STORAGE_PREFIX = 'anbarin_accounting_template_v1_';
+
+function getTemplate(kind: AccountingTemplateKind): AccountingField[] {
+  try {
+    const raw = localStorage.getItem(TEMPLATE_STORAGE_PREFIX + kind);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const valid = parsed.filter((v): v is AccountingField => ACCOUNTING_FIELDS.some((f) => f.id === v));
+        if (valid.length) return valid;
+      }
+    }
+  } catch (e) { console.warn('Could not read accounting template', e); }
+  return [...DEFAULT_ACCOUNTING_FIELDS];
+}
+
+export function initAccountingTemplateUI(): void {
+  const target = document.getElementById('accountingTemplateTarget') as HTMLSelectElement | null;
+  const fieldsHost = document.getElementById('accountingTemplateFields');
+  if (!target || !fieldsHost || fieldsHost.dataset.initialized === '1') return;
+  fieldsHost.dataset.initialized = '1';
+  fieldsHost.innerHTML = ACCOUNTING_FIELDS.map((f) => `<label class="accounting-field-option" style="display:flex;align-items:center;gap:8px;padding:6px 2px"><input type="checkbox" data-accounting-field="${f.id}" checked><span>${f.label}</span></label>`).join('');
+
+  const applyTemplate = () => {
+    const selected = getTemplate(target.value as AccountingTemplateKind);
+    fieldsHost.querySelectorAll<HTMLInputElement>('input[data-accounting-field]').forEach((el) => {
+      el.checked = selected.includes(el.dataset.accountingField as AccountingField);
+    });
+  };
+  target.addEventListener('change', applyTemplate);
+  document.getElementById('btnSaveAccountingTemplate')?.addEventListener('click', () => {
+    const chosen = Array.from(fieldsHost.querySelectorAll<HTMLInputElement>('input[data-accounting-field]:checked'))
+      .map((el) => el.dataset.accountingField as AccountingField);
+    if (!chosen.length) { toast('حداقل یک ستون را انتخاب کنید', 'error'); return; }
+    try {
+      localStorage.setItem(TEMPLATE_STORAGE_PREFIX + target.value, JSON.stringify(chosen));
+      toast(`قالب ${target.value === 'heloo' ? 'هلو' : 'سپیدار'} ذخیره شد`, 'success');
+      logAudit('save_accounting_template', { kind: target.value, fields: chosen });
+    } catch (e) { console.error(e); toast('ذخیره قالب ناموفق بود', 'error'); }
+  });
+  document.getElementById('btnExportAccountingTemplate')?.addEventListener('click', () => {
+    const chosen = Array.from(fieldsHost.querySelectorAll<HTMLInputElement>('input[data-accounting-field]:checked'))
+      .map((el) => el.dataset.accountingField as AccountingField);
+    if (!chosen.length) { toast('حداقل یک ستون را انتخاب کنید', 'error'); return; }
+    exportConfiguredAccounting(target.value as AccountingTemplateKind, chosen);
+  });
+  applyTemplate();
+}
+
+function exportConfiguredAccounting(kind: AccountingTemplateKind, chosen: AccountingField[]): void {
+  const list = activeList().filter((p) => p.countedQty != null);
+  if (!list.length) { toast('کالای شمارش‌شده‌ای برای خروجی وجود ندارد', 'error'); return; }
+  const labels: Record<AccountingField, string> = {
+    barcode: 'بارکد', name: 'نام کالا', code: 'کد کالا', systemQty: 'موجودی سیستم',
+    countedQty: 'موجودی شمارش‌شده', diff: 'مغایرت', unitPrice: 'قیمت واحد',
+    diffValue: 'ارزش مغایرت', unit: 'واحد کالا', location: 'محل کالا',
+  };
+  const rows = list.map((p) => {
+    const diff = (p.countedQty ?? 0) - (p.systemQty ?? 0);
+    const values: Record<AccountingField, unknown> = {
+      // Barcode is intentionally a string cell to preserve leading zeros.
+      barcode: String(p.code ?? '').trim(),
+      name: p.name ?? '',
+      code: String(p.sku ?? p.code ?? '').trim(),
+      systemQty: p.systemQty ?? 0,
+      countedQty: p.countedQty ?? 0,
+      diff,
+      unitPrice: p.price ?? 0,
+      diffValue: diff * (p.price ?? 0),
+      unit: p.unit ?? '',
+      location: p.location ?? '',
+    };
+    return chosen.map((field) => values[field]);
+  });
+  const headers = chosen.map((field) => labels[field]);
+  const filename = `anbarin-${kind === 'heloo' ? 'heloo' : 'sepidar'}-custom-${dateStr()}.xlsx`;
+  try {
+    const bytes = buildOfflineXlsx([{ name: kind === 'heloo' ? 'خروجی هلو' : 'خروجی سپیدار', rows: [headers, ...rows] }]);
+    downloadFile(new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), filename,
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    toast(`فایل اکسل ساخته شد؛ ${list.length} کالا و ${chosen.length} ستون`, 'success');
+    logAudit('export_accounting_custom_xlsx', { kind, count: list.length, fields: chosen });
+  } catch (error) {
+    console.error('Custom accounting XLSX export failed', error);
+    toast('ساخت فایل اکسل ناموفق بود', 'error');
+  }
+}
+
 
 export function exportDoubleCountMismatches(): void {
   if (!isDoubleCount()) {

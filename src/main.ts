@@ -71,6 +71,7 @@ import {
   exportDoubleCountMismatches,
   exportStockAlerts,
   exportDiffsExcel,
+  initAccountingTemplateUI,
 } from './modules/reports';
 import {
   captureProductPhoto,
@@ -391,6 +392,19 @@ function renderShell() {
             <button class="btn btn-secondary btn-block" id="btnAccGeneric">📒 سند اصلاح (عمومی)</button>
             <button class="btn btn-secondary btn-block" id="btnAccHeloo">📒 قالب هلو</button>
             <button class="btn btn-secondary btn-block" id="btnAccSepidar">📒 قالب سپیدار</button>
+            <details class="card" style="margin-top:10px;padding:12px">
+              <summary style="cursor:pointer;font-weight:700">⚙️ تنظیم ستون‌های خروجی اکسل هلو و سپیدار</summary>
+              <p class="hint" style="margin:8px 0">قالب هر نرم‌افزار جداگانه ذخیره می‌شود. خروجی شامل کالاهای شمارش‌شده است و ستون «موجودی شمارش‌شده» مقدار نهایی شمارش را نشان می‌دهد.</p>
+              <label for="accountingTemplateTarget">قالب مقصد</label>
+              <select id="accountingTemplateTarget" class="search-input" style="margin:6px 0 10px;width:100%">
+                <option value="heloo">هلو</option><option value="sepidar">سپیدار</option>
+              </select>
+              <div id="accountingTemplateFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:2px"></div>
+              <div class="actions" style="margin-top:10px">
+                <button class="btn btn-secondary btn-block" id="btnSaveAccountingTemplate" type="button">💾 ذخیره قالب انتخابی</button>
+                <button class="btn btn-primary btn-block" id="btnExportAccountingTemplate" type="button">📊 خروجی اکسل با ستون‌های انتخابی</button>
+              </div>
+            </details>
             <button class="btn btn-secondary btn-block" id="btnDoubleDiff">📥 اختلاف فاز ۱ و ۲</button>
             <button class="btn btn-secondary btn-block" id="btnStockAlerts">⚠️ هشدار موجودی</button>
             <button class="btn btn-secondary btn-block" id="btnPrintLabels">🏷️ چاپ لیبل بارکد (تا ۵۰)</button>
@@ -851,6 +865,7 @@ function bindEvents() {
   document.getElementById('btnAccGeneric')?.addEventListener('click', () => exportAccountingDoc('generic'));
   document.getElementById('btnAccHeloo')?.addEventListener('click', () => exportAccountingDoc('heloo'));
   document.getElementById('btnAccSepidar')?.addEventListener('click', () => exportAccountingDoc('sepidar'));
+  initAccountingTemplateUI();
   document.getElementById('btnDoubleDiff')?.addEventListener('click', () => exportDoubleCountMismatches());
   document.getElementById('btnStockAlerts')?.addEventListener('click', () => exportStockAlerts());
 
