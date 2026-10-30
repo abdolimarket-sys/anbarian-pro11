@@ -282,13 +282,15 @@ async function startCamera(): Promise<void> {
     return;
   }
 
-  const nativeOk = await tryStartNative();
-  if (nativeOk) return;
+// اولویت اول: Html5Qrcode
+if (typeof (window as any).Html5Qrcode !== 'undefined') {
+  const html5Ok = await tryStartHtml5();
+  if (html5Ok) return;
+}
 
-  if (typeof (window as any).Html5Qrcode !== 'undefined') {
-    await tryStartHtml5();
-    return;
-  }
+// اولویت دوم: BarcodeDetector
+const nativeOk = await tryStartNative();
+if (nativeOk) return;
 
   toast(
     'موتور اسکن بارکد لود نشده. از بارکدخوان USB/Bluetooth یا ورود دستی استفاده کنید',
@@ -457,7 +459,7 @@ async function tryStartNative(): Promise<boolean> {
   }
 }
 
-async function tryStartHtml5(): Promise<void> {
+async function tryStartHtml5(): Promise<boolean>{
   const Html5Qrcode = (window as any).Html5Qrcode;
   if (!Html5Qrcode || !opts) return;
 
@@ -492,6 +494,7 @@ async function tryStartHtml5(): Promise<void> {
       },
       () => {}
     );
+	return true;
   } catch (err: any) {
     console.error('[scanner] html5 failed', err);
     const name = err?.name || '';
@@ -500,7 +503,9 @@ async function tryStartHtml5(): Promise<void> {
     } else {
       toast('راه‌اندازی دوربین ناموفق بود — ورود دستی یا USB را امتحان کنید', 'error');
     }
+	return false;
   }
+  
 }
 
 function stopNative(): void {
