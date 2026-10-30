@@ -461,7 +461,7 @@ async function tryStartNative(): Promise<boolean> {
 
 async function tryStartHtml5(): Promise<boolean>{
   const Html5Qrcode = (window as any).Html5Qrcode;
-  if (!Html5Qrcode || !opts) return;
+  if (!Html5Qrcode || !opts) return false;
 
   try {
     if (!html5Instance) {
