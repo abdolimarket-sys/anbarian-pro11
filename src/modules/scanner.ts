@@ -53,11 +53,16 @@ let torchOn = false;
 // Html5Qrcode fallback (any برای جلوگیری از وابستگی سخت)
 let html5Instance: any = null;
 
+// Serialize camera start/stop operations. WebView camera engines are async and
+// must not be started again while a previous instance is still stopping.
+let cameraLifecycle: Promise<void> = Promise.resolve();
+let cameraRequestId = 0;
+
 // Debounce / guard
 let lastScanTime = 0;
 let lastScanCode = '';
-const SCAN_COOLDOWN_MS = 380;
-const SAME_CODE_COOLDOWN_MS = 1200;
+const SCAN_COOLDOWN_MS = 250;
+const SAME_CODE_COOLDOWN_MS = 900;
 
 // Bluetooth / keyboard wedge
 let btBuffer = '';
@@ -90,6 +95,7 @@ export function openScanner(options?: {
   scanTargetField = options?.targetField ?? null;
   quickMode = !!options?.quick;
   active = true;
+  const requestId = ++cameraRequestId;
 
   // UI title اگر وجود داشته باشد
   const titleEl = document.getElementById('scannerTitle');
@@ -98,17 +104,29 @@ export function openScanner(options?: {
   const modal = document.getElementById('scannerModal');
   if (modal) modal.classList.add('show');
 
-  startCamera();
+  cameraLifecycle = cameraLifecycle
+    .then(async () => {
+      if (!active || requestId !== cameraRequestId) return;
+      // Ensure a previous camera session is fully released before reopening.
+      await stopCamera();
+      if (!active || requestId !== cameraRequestId) return;
+      await startCamera(requestId);
+    })
+    .catch((err) => console.error('[scanner] open lifecycle failed', err));
 }
 
 export function closeScanner(): void {
   active = false;
+  ++cameraRequestId;
   scanTargetField = null;
   quickMode = false;
-  stopCamera();
 
   const modal = document.getElementById('scannerModal');
   if (modal) modal.classList.remove('show');
+
+  cameraLifecycle = cameraLifecycle
+    .then(() => stopCamera())
+    .catch((err) => console.error('[scanner] close lifecycle failed', err));
 }
 
 export function submitManualBarcode(raw?: string): void {
@@ -145,8 +163,14 @@ export async function toggleTorch(): Promise<void> {
 }
 
 export function restartCamera(): void {
-  stopCamera();
-  setTimeout(() => startCamera(), 200);
+  if (!active) return;
+  const requestId = ++cameraRequestId;
+  cameraLifecycle = cameraLifecycle
+    .then(async () => {
+      await stopCamera();
+      if (active && requestId === cameraRequestId) await startCamera(requestId);
+    })
+    .catch((err) => console.error('[scanner] restart lifecycle failed', err));
 }
 
 export function playBeep(ok: boolean): void {
@@ -253,7 +277,12 @@ function cameraDiagMessage(): string {
   return '';
 }
 
-async function startCamera(): Promise<void> {
+function isCurrentCameraRequest(requestId: number): boolean {
+  return active && requestId === cameraRequestId;
+}
+
+async function startCamera(requestId: number): Promise<void> {
+  if (!isCurrentCameraRequest(requestId) || !opts) return;
   torchOn = false;
   const btn = document.getElementById('torchBtn');
   if (btn) btn.textContent = '🔦 نور';
@@ -269,7 +298,9 @@ async function startCamera(): Promise<void> {
   try {
     const warm = await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
     warm.getTracks().forEach((tr) => tr.stop());
+    if (!isCurrentCameraRequest(requestId)) return;
   } catch (err: any) {
+    if (!isCurrentCameraRequest(requestId)) return;
     const name = err?.name || '';
     if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
       toast('مجوز دوربین داده نشده — از تنظیمات گوشی برای این اپ، دوربین را فعال کنید', 'error');
@@ -284,13 +315,15 @@ async function startCamera(): Promise<void> {
 
 // اولویت اول: Html5Qrcode
 if (typeof (window as any).Html5Qrcode !== 'undefined') {
-  const html5Ok = await tryStartHtml5();
+  const html5Ok = await tryStartHtml5(requestId);
   if (html5Ok) return;
 }
+if (!isCurrentCameraRequest(requestId)) return;
 
 // اولویت دوم: BarcodeDetector
-const nativeOk = await tryStartNative();
+const nativeOk = await tryStartNative(requestId);
 if (nativeOk) return;
+if (!isCurrentCameraRequest(requestId)) return;
 
   toast(
     'موتور اسکن بارکد لود نشده. از بارکدخوان USB/Bluetooth یا ورود دستی استفاده کنید',
@@ -299,7 +332,8 @@ if (nativeOk) return;
   document.getElementById('manualBarcode')?.focus();
 }
 
-async function tryStartNative(): Promise<boolean> {
+async function tryStartNative(requestId: number): Promise<boolean> {
+  if (!isCurrentCameraRequest(requestId)) return false;
   if (
     !('mediaDevices' in navigator) ||
     !navigator.mediaDevices.getUserMedia ||
@@ -384,6 +418,11 @@ async function tryStartNative(): Promise<boolean> {
     }
     if (!stream) throw lastErr || new Error('camera');
 
+    if (!isCurrentCameraRequest(requestId)) {
+      stream.getTracks().forEach((track) => track.stop());
+      return false;
+    }
+
     nativeStream = stream;
     video.srcObject = stream;
     await video.play();
@@ -405,7 +444,7 @@ async function tryStartNative(): Promise<boolean> {
     nativeBusy = false;
 
     const loop = async () => {
-      if (!nativeVideo || !nativeStream || !active) return;
+      if (!nativeVideo || !nativeStream || !isCurrentCameraRequest(requestId)) return;
       nativeRaf = requestAnimationFrame(loop);
 
       frameSkip++;
@@ -422,7 +461,7 @@ async function tryStartNative(): Promise<boolean> {
           const vw = video.videoWidth;
           const vh = video.videoHeight;
           if (vw > 0 && vh > 0 && nativeCtx && nativeCanvas) {
-            const cropH = Math.max(80, Math.floor(vh * 0.32));
+            const cropH = Math.max(120, Math.floor(vh * 0.55));
             const cropY = Math.floor((vh - cropH) / 2);
             const targetW = Math.min(960, vw);
             const scale = targetW / vw;
@@ -459,14 +498,14 @@ async function tryStartNative(): Promise<boolean> {
   }
 }
 
-async function tryStartHtml5(): Promise<boolean>{
+async function tryStartHtml5(requestId: number): Promise<boolean>{
   const Html5Qrcode = (window as any).Html5Qrcode;
-  if (!Html5Qrcode || !opts) return false;
+  if (!Html5Qrcode || !opts || !isCurrentCameraRequest(requestId)) return false;
 
   try {
-    if (!html5Instance) {
-      html5Instance = new Html5Qrcode(opts.containerId);
-    }
+    if (html5Instance) await stopHtml5();
+    if (!isCurrentCameraRequest(requestId)) return false;
+    html5Instance = new Html5Qrcode(opts.containerId);
 
     const formats = (window as any).Html5QrcodeSupportedFormats
       ? [
@@ -484,25 +523,25 @@ async function tryStartHtml5(): Promise<boolean>{
     await html5Instance.start(
       { facingMode: 'environment' },
       {
-        fps: 10,
-        qrbox: { width: 280, height: 120 },
-        formatsToSupport: formats,
-        aspectRatio: 1.777,
+  fps: 15,
+  qrbox: (viewfinderWidth: number, viewfinderHeight: number) => {
+    return {
+      width: Math.floor(viewfinderWidth * 0.85),
+      height: Math.floor(viewfinderHeight * 0.55),
+    };
+  },
+  formatsToSupport: formats,
       },
       (decoded: string) => {
-        if (shouldAcceptScan(decoded)) emitScan(decoded, 'html5');
+        if (isCurrentCameraRequest(requestId) && shouldAcceptScan(decoded)) emitScan(decoded, 'html5');
       },
       () => {}
     );
-	return true;
+	return isCurrentCameraRequest(requestId);
   } catch (err: any) {
     console.error('[scanner] html5 failed', err);
-    const name = err?.name || '';
-    if (name === 'NotAllowedError') {
-      toast('مجوز دوربین رد شد', 'error');
-    } else {
-      toast('راه‌اندازی دوربین ناموفق بود — ورود دستی یا USB را امتحان کنید', 'error');
-    }
+    await stopHtml5();
+	// Do not show a failure toast here: BarcodeDetector is tried next.
 	return false;
   }
   
@@ -527,17 +566,25 @@ function stopNative(): void {
 
 async function stopHtml5(): Promise<void> {
   if (html5Instance) {
+    const instance = html5Instance;
     try {
-      if (html5Instance.isScanning) await html5Instance.stop();
+      if (instance.isScanning) await instance.stop();
     } catch {
       // ignore
     }
+    try {
+      if (typeof instance.clear === 'function') await instance.clear();
+    } catch {
+      // clear may fail if the library already removed its DOM; the next
+      // instance is still created fresh below.
+    }
+    if (html5Instance === instance) html5Instance = null;
   }
 }
 
-function stopCamera(): void {
+async function stopCamera(): Promise<void> {
   stopNative();
-  stopHtml5();
+  await stopHtml5();
 
   const host = opts ? document.getElementById(opts.containerId) : null;
   if (host) host.innerHTML = '';
