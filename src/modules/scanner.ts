@@ -45,7 +45,6 @@ let nativeVideo: HTMLVideoElement | null = null;
 let nativeDetector: { detect: (source: ImageBitmapSource | HTMLVideoElement | HTMLCanvasElement) => Promise<Array<{ rawValue: string }>> } | null = null;
 let nativeRaf = 0;
 let nativeBusy = false;
-let frameSkip = 0;
 let torchOn = false;
 
 // Html5Qrcode fallback (any برای جلوگیری از وابستگی سخت)
@@ -63,8 +62,9 @@ function isCurrentCameraRequest(requestId: number): boolean {
 // Debounce / guard
 let lastScanTime = 0;
 let lastScanCode = '';
-const SCAN_COOLDOWN_MS = 250;
-const SAME_CODE_COOLDOWN_MS = 900;
+const SCAN_COOLDOWN_MS = 200;
+const SAME_CODE_COOLDOWN_MS = 700;
+let scanFeedbackTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Bluetooth / keyboard wedge
 let btBuffer = '';
@@ -232,9 +232,10 @@ function emitScan(code: string, source: ScanSource): void {
     return;
   }
   if (opts.isQtyModalOpen?.()) return;
-  if (!shouldAcceptScan(code) && code === lastScanCode) return;
+  if (!shouldAcceptScan(code)) return;
 
   lastScanTime = Date.now();
+  showScanSuccess();
   lastScanCode = code;
 
   // حالت پر کردن فیلد
@@ -251,6 +252,29 @@ function emitScan(code: string, source: ScanSource): void {
   }
 
   opts.onScan({ code, source, at: lastScanTime });
+}
+
+function mountScanGuide(host: HTMLElement): void {
+  host.querySelector('.scan-guide')?.remove();
+  const guide = document.createElement('div');
+  guide.className = 'scan-guide';
+  guide.innerHTML =
+    '<div class="scan-guide-frame"></div><div class="scan-guide-label">بارکد را در کادر قرار دهید</div>';
+  host.appendChild(guide);
+}
+
+function showScanSuccess(): void {
+  const frame = document.querySelector('#scanner-container .scan-guide-frame');
+  if (!frame) return;
+  frame.classList.remove('is-detected');
+  // Force a style boundary so consecutive successful reads retrigger feedback.
+  void (frame as HTMLElement).offsetWidth;
+  frame.classList.add('is-detected');
+  if (scanFeedbackTimer) clearTimeout(scanFeedbackTimer);
+  scanFeedbackTimer = setTimeout(() => {
+    frame.classList.remove('is-detected');
+    scanFeedbackTimer = null;
+  }, 420);
 }
 
 function ensureMediaDevices(): boolean {
@@ -379,12 +403,8 @@ async function tryStartNative(requestId: number): Promise<boolean> {
     host.innerHTML = '';
     host.appendChild(video);
 
-    // راهنمای اسکن
-    const guide = document.createElement('div');
-    guide.className = 'scan-guide';
-    guide.innerHTML =
-      '<div class="scan-guide-frame"></div><div class="scan-guide-label">بارکد را در هر قسمت کادر قرار دهید</div>';
-    host.appendChild(guide);
+    // راهنمای ثابت؛ بازخورد سبز پس از تشخیص موفق روی همین کادر اعمال می‌شود.
+    mountScanGuide(host);
 
     nativeVideo = video;
 
@@ -445,15 +465,13 @@ async function tryStartNative(requestId: number): Promise<boolean> {
       // ignore
     }
 
-    frameSkip = 0;
     nativeBusy = false;
 
     const loop = async () => {
       if (!nativeVideo || !nativeStream || !isCurrentCameraRequest(requestId)) return;
       nativeRaf = requestAnimationFrame(loop);
 
-      frameSkip++;
-      if (frameSkip % 2) return; // هر ۲ فریم یک‌بار
+      // تلاش در هر فریم؛ nativeBusy اجازه هم‌پوشانی عملیات decode را نمی‌دهد.
       if (nativeBusy || video.readyState < 2) return;
       if (opts?.isQtyModalOpen?.()) return;
 
@@ -516,7 +534,7 @@ async function tryStartHtml5(requestId: number): Promise<boolean> {
     await html5Instance.start(
       { facingMode: 'environment' },
       {
-        fps: 15,
+        fps: 20,
         // Leave qrbox unset so Html5Qrcode decodes the entire video frame.
         // A cropped qrbox can drift from the displayed preview on WebView
         // devices when the video is scaled to fit the scanner container.
@@ -535,6 +553,8 @@ async function tryStartHtml5(requestId: number): Promise<boolean> {
       await stopHtml5();
       return false;
     }
+    const host = document.getElementById(opts.containerId);
+    if (host) mountScanGuide(host);
     return true;
   } catch (err: any) {
     console.error('[scanner] html5 failed', err);
@@ -579,6 +599,10 @@ async function stopHtml5(): Promise<void> {
 }
 
 async function stopCamera(): Promise<void> {
+  if (scanFeedbackTimer) {
+    clearTimeout(scanFeedbackTimer);
+    scanFeedbackTimer = null;
+  }
   stopNative();
   await stopHtml5();
 
